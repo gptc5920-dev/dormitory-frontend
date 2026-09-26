@@ -1,4 +1,11 @@
-export const API_BASE = (import.meta.env?.VITE_API_URL || "/api").replace(/\/$/, "");
+import axios from "axios";
+
+export const API_BASE_URL = import.meta.env?.VITE_API_URL || "http://127.0.0.1:8000";
+const configuredBase = API_BASE_URL.replace(/\/+$/, "");
+export const API_BASE = configuredBase.endsWith("/api") ? configuredBase : `${configuredBase}/api`;
+
+const client = axios.create({ baseURL: API_BASE_URL });
+export default client;
 
 const inFlightGets = new Map();
 
@@ -26,19 +33,29 @@ async function request(path, options) {
 
   let response;
   try {
-    response = await fetch(`${API_BASE}${path}`, { ...options, headers });
+    const { body, ...config } = options;
+    response = await client.request({
+      ...config,
+      baseURL: API_BASE,
+      url: path,
+      data: body,
+      headers,
+      responseType: "text",
+      transformResponse: [(data) => data],
+      validateStatus: () => true,
+    });
   } catch (error) {
-    if (error.name === "AbortError") throw new Error("The request was cancelled.");
+    if (axios.isCancel(error) || error.name === "AbortError") throw new Error("The request was cancelled.");
     throw new Error("Unable to reach the server. Check that the backend is running and try again.");
   }
-  const text = response.status === 204 ? "" : await response.text();
+  const text = response.status === 204 ? "" : response.data;
   let body = null;
   try {
     body = text ? JSON.parse(text) : null;
   } catch {
     body = text;
   }
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     if (response.status === 401) window.dispatchEvent(new Event("dormitory:unauthorized"));
     throw new Error(describeError(body, `Request failed (${response.status})`));
   }
