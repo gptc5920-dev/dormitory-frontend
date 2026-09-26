@@ -1,11 +1,19 @@
-FROM node:22-bookworm-slim AS build
+# Step 1: Build the React application
+FROM node:20-alpine AS build
 WORKDIR /app
-COPY frontend/package.json frontend/package-lock.json ./
+
+COPY package*.json ./
 RUN npm ci
-COPY frontend/ ./
+
+COPY . .
 RUN npm run build
 
-FROM nginx:1.28-alpine
-COPY deploy/nginx.conf /etc/nginx/conf.d/default.conf
+# Step 2: Serve with Nginx
+FROM nginx:alpine
 COPY --from=build /app/dist /usr/share/nginx/html
+# Note: If using Create React App instead of Vite, change '/app/dist' to '/app/build'
+
+# Expose port 80
 EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]
