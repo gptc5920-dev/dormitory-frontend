@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Camera, CircleStop, MonitorPlay, Play, Plus, ScanLine, Settings2, Trash2, Upload, Video } from "lucide-react";
+import { BellRing, Camera, CircleStop, MonitorPlay, Play, Plus, ScanLine, Settings2, Trash2, Upload, Video, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { api, apiList, rows } from "../api";
 import { ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import NetworkCameraStream from "../components/NetworkCameraStream";
 import Modal from "../components/Modal";
+import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
 
 const CAMERA_BINDINGS_KEY = "dormitory_camera_device_bindings";
 
@@ -29,7 +31,7 @@ function emptyCameraForm(source, deviceId = "") {
   };
 }
 
-function CameraStream({ source, deviceId, onConfigure, registerController }) {
+function CameraStream({ source, deviceId, onConfigure, registerController, onUnknownFace, onActivity }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -38,6 +40,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
   const timerRef = useRef(null);
   const busyRef = useRef(false);
   const cameraSessionRef = useRef(0);
+  const unknownFaceRef = useRef(createUnknownFaceTracker());
   const [cameraOn, setCameraOn] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -60,6 +63,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
     setAnalyzing(false);
     setFocusLabel("");
     setVideoViewport(null);
+    resetUnknownFaceTracker(unknownFaceRef.current);
   }, []);
 
   const updateVideoViewport = useCallback(() => {
@@ -94,9 +98,9 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           deviceId: { exact: deviceId },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 24, max: 30 },
+          width: { ideal: 960 },
+          height: { ideal: 540 },
+          frameRate: { ideal: 20, max: 24 },
         },
         audio: false,
       });
@@ -149,17 +153,25 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
     setAnalyzing(true);
     try {
       const canvas = canvasRef.current;
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
+      const scale = Math.min(1, 960 / videoRef.current.videoWidth);
+      canvas.width = Math.max(1, Math.round(videoRef.current.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(videoRef.current.videoHeight * scale));
       canvas.getContext("2d").drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.75));
       if (session !== cameraSessionRef.current) return;
       if (!blob) throw new Error("The browser could not capture a camera frame.");
       const body = new FormData();
       body.append("frame", blob, `${source.name.toLowerCase().replaceAll(" ", "-") || "camera"}-frame.jpg`);
       body.append("source", String(source.id));
       const nextResult = await api("/monitoring/detect-frame/", { method: "POST", body });
-      if (session === cameraSessionRef.current && streamRef.current) setResult(nextResult);
+      if (session === cameraSessionRef.current && streamRef.current) {
+        setResult(nextResult);
+        if (nextResult.incidents_created?.length) onActivity({ source, incidents: nextResult.incidents_created });
+        if (!nextResult.face_recognition_error) {
+          const count = trackUnknownFaces(unknownFaceRef.current, nextResult.faces);
+          if (count) onUnknownFace({ source, count });
+        }
+      }
     } catch (err) {
       if (session === cameraSessionRef.current) setError(err.message);
     } finally {
@@ -168,12 +180,13 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
         setAnalyzing(false);
       }
     }
-  }, [source.id, source.name]);
+  }, [source, onUnknownFace, onActivity]);
 
   const toggleScanning = useCallback(() => {
     if (scanning) {
       clearInterval(timerRef.current);
       timerRef.current = null;
+      resetUnknownFaceTracker(unknownFaceRef.current);
       setScanning(false);
       return;
     }
@@ -229,6 +242,16 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
         };
         return <div className={`detection-box ${item.incident_type}`} style={style} key={`${item.incident_type}-${index}`}><span>{item.label} · {Math.round(item.confidence * 100)}%</span></div>;
       })}
+      {cameraOn && videoViewport && result?.faces?.map((face, index) => {
+        const [x1, y1, x2, y2] = face.box;
+        const style = {
+          left: videoViewport.left + (x1 / sourceWidth) * videoViewport.width,
+          top: videoViewport.top + (y1 / sourceHeight) * videoViewport.height,
+          width: ((x2 - x1) / sourceWidth) * videoViewport.width,
+          height: ((y2 - y1) / sourceHeight) * videoViewport.height,
+        };
+        return <div className={`detection-box ${face.status === "possible_match" ? "face-match" : "face-unknown"}`} style={style} key={`face-${index}`}><span>{face.tenant_name ? `Possible match: ${face.tenant_name}` : "Unknown face"}</span></div>;
+      })}
       {cameraOn && <div className="camera-readout"><span>{videoRef.current?.videoWidth || "—"} × {videoRef.current?.videoHeight || "—"}</span><span>{focusLabel}</span></div>}
       <canvas ref={canvasRef} hidden />
     </div>
@@ -239,17 +262,22 @@ function CameraStream({ source, deviceId, onConfigure, registerController }) {
       </>}
     </div>
     {error && <p className="camera-error">{error}</p>}
-    <div className="camera-result"><strong>Latest scan</strong>{!result ? <span className="muted">No frame analyzed yet.</span> : result.detections.length ? <><span>{result.detections.map((item) => item.label).join(", ")}</span><small>{result.incidents_created.length} new incident(s) created.</small></> : <span className="clear-result">No target cues detected</span>}</div>
+    <div className="camera-result"><strong>Latest scan</strong>{!result ? <span className="muted">No frame analyzed yet.</span> : <><span>{result.detections.length ? result.detections.map((item) => item.label).join(", ") : "No target cues detected"}</span>{result.faces?.length > 0 && <small>Faces: {result.faces.map((face) => face.tenant_name ? `Possible match: ${face.tenant_name}` : "Unknown").join(", ")}. Confirm any match before acting.</small>}{result.face_recognition_error && <small>Face matching unavailable: {result.face_recognition_error}</small>}<small>{result.incidents_created.length} new incident(s) created.</small></>}</div>
   </article>;
 }
 
 export default function MonitoringPage() {
   const controllersRef = useRef(new Map());
+  const alertIdRef = useRef(0);
   const [setupOpen, setSetupOpen] = useState(false);
+  const [cameraAlerts, setCameraAlerts] = useState([]);
+  const [desktopPermission, setDesktopPermission] = useState(() => window.Notification?.permission || "unsupported");
   const [status, setStatus] = useState(null);
   const [rooms, setRooms] = useState([]);
   const [sources, setSources] = useState([]);
   const [bindings, setBindings] = useState(readCameraBindings);
+  const bindingsRef = useRef(bindings);
+  bindingsRef.current = bindings;
   const [devices, setDevices] = useState([]);
   const [discoveringDevices, setDiscoveringDevices] = useState(false);
   const [cameraForm, setCameraForm] = useState(() => emptyCameraForm());
@@ -259,6 +287,39 @@ export default function MonitoringPage() {
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const pushCameraAlert = useCallback(({ title, detail, tag, incidentId }) => {
+    setCameraAlerts((current) => [{ id: ++alertIdRef.current, title, detail, incidentId }, ...current].slice(0, 5));
+    if (window.Notification?.permission === "granted") {
+      try { new window.Notification(title, { body: detail, tag }); } catch { /* In-app alert remains available. */ }
+    }
+  }, []);
+
+  const notifyUnknownFace = useCallback(({ source, count }) => {
+    pushCameraAlert({
+      title: "Unrecognized face detected",
+      detail: `${count} face${count === 1 ? "" : "s"} could not be matched at ${source.name}${source.location ? ` (${source.location})` : ""}. Review the camera before acting.`,
+      tag: `unknown-face-${source.id}`,
+    });
+  }, [pushCameraAlert]);
+
+  const notifyActivity = useCallback(({ source, incidents }) => {
+    const labels = [...new Set(incidents.map((incident) => incident.incident_type?.replaceAll("_", " ") || "activity"))];
+    pushCameraAlert({
+      title: "Camera activity needs review",
+      detail: `${incidents.length} new incident${incidents.length === 1 ? "" : "s"} at ${source.name}${source.location ? ` (${source.location})` : ""}: ${labels.join(", ")}.`,
+      tag: `camera-activity-${source.id}-${incidents[0].id}`,
+      incidentId: incidents[0].id,
+    });
+  }, [pushCameraAlert]);
+
+  async function enableDesktopAlerts() {
+    try {
+      const permission = await window.Notification.requestPermission();
+      setDesktopPermission(permission);
+      if (permission === "denied") setError("Browser notifications are blocked. Camera alerts will still appear here.");
+    } catch (err) { setError(`Unable to enable browser notifications: ${err.message}`); }
+  }
 
   const loadData = useCallback(async () => {
     const [model, roomData, sourceData] = await Promise.all([
@@ -287,7 +348,8 @@ export default function MonitoringPage() {
         if (!cameras.length) throw new Error("No cameras found. Connect a webcam, then try Discover cameras again.");
         setCameraForm((current) => ({
           ...current,
-          deviceId: cameras.some((camera) => camera.deviceId === current.deviceId) ? current.deviceId : cameras[0].deviceId,
+          deviceId: cameras.filter((camera) => !Object.entries(bindingsRef.current).some(([sourceId, boundDevice]) => Number(sourceId) !== current.id && boundDevice === camera.deviceId)).find((camera) => camera.deviceId === current.deviceId)?.deviceId
+            || cameras.find((camera) => !Object.entries(bindingsRef.current).some(([sourceId, boundDevice]) => Number(sourceId) !== current.id && boundDevice === camera.deviceId))?.deviceId || "",
         }));
       }
     } catch (err) {
@@ -338,7 +400,9 @@ export default function MonitoringPage() {
   function configureCamera(source) {
     setError("");
     setSuccess("");
-    setCameraForm(emptyCameraForm(source, source ? bindings[source.id] || "" : devices[0]?.deviceId || ""));
+    const available = devices.filter((device) => !Object.entries(bindings).some(([sourceId, boundDevice]) => Number(sourceId) !== source?.id && boundDevice === device.deviceId));
+    const savedDevice = source ? bindings[source.id] : "";
+    setCameraForm(emptyCameraForm(source, available.find((device) => device.deviceId === savedDevice)?.deviceId || available[0]?.deviceId || ""));
     setSetupOpen(true);
   }
 
@@ -356,6 +420,10 @@ export default function MonitoringPage() {
     setSuccess("");
     if (cameraForm.source_type === "webcam" && !devices.some((device) => device.deviceId === cameraForm.deviceId)) {
       setError("Discover cameras and choose a connected browser camera before saving this source.");
+      return;
+    }
+    if (cameraForm.source_type === "webcam" && Object.entries(bindings).some(([sourceId, deviceId]) => Number(sourceId) !== cameraForm.id && deviceId === cameraForm.deviceId)) {
+      setError("This browser camera is already assigned to another source. Choose a different camera.");
       return;
     }
     setSavingCamera(true);
@@ -438,8 +506,15 @@ export default function MonitoringPage() {
 
   const browserSources = sources.filter((source) => ["webcam", "ip_camera"].includes(source.source_type) && source.is_enabled);
   const configuredCount = browserSources.filter((source) => source.source_type === "ip_camera" ? source.has_stream_url : bindings[source.id]).length;
+  const assignableDevices = devices.filter((device) => !Object.entries(bindings).some(([sourceId, boundDevice]) => Number(sourceId) !== cameraForm.id && boundDevice === device.deviceId));
 
   return <div className="page">
+    <div className="camera-notifications" aria-label="Camera notifications">
+      {cameraAlerts.map((alert) => <div key={alert.id} className="camera-notification" role="alert">
+        <BellRing size={19} aria-hidden="true" /><div><strong>{alert.title}</strong><p>{alert.detail}</p>{alert.incidentId && <Link to={`/incidents?incident=${alert.incidentId}`}>Review incident</Link>}</div>
+        <button className="icon-button" type="button" aria-label={alert.incidentId ? "Dismiss camera activity notification" : "Dismiss unrecognized face notification"} onClick={() => setCameraAlerts((current) => current.filter((item) => item.id !== alert.id))}><X size={17} /></button>
+      </div>)}
+    </div>
     <header className="page-header"><div><p className="eyebrow">Camera operations</p><h1>Monitoring</h1></div><span className={`status ${status?.weights_available ? "verified" : "reviewed"}`}>{status?.weights_available ? "YOLO Nano ready" : "Fallback mode"}</span></header>
     <ErrorMessage message={setupOpen ? "" : error} />
     <SuccessMessage message={success} />
@@ -447,10 +522,10 @@ export default function MonitoringPage() {
       <section className="model-banner"><ScanLine size={21} /><div><strong>{status.mode}</strong><span>{status.notice}</span></div></section>
       <section className="camera-toolbar panel">
         <div><p className="eyebrow">Live cameras</p><h2>{configuredCount} of {browserSources.length} source{browserSources.length === 1 ? "" : "s"} configured</h2><span>Each source can stream and run detection independently.</span></div>
-        <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button></div>
+        <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button>{desktopPermission === "default" && <button className="button subtle" type="button" onClick={enableDesktopAlerts}><BellRing size={17} />Enable desktop alerts</button>}{desktopPermission === "granted" && <span className="status verified">Desktop alerts on</span>}</div>
       </section>
       <section className="camera-stream-grid">
-        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} />)}
+        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} />)}
         {!browserSources.length && <div className="empty camera-empty"><Camera size={25} /><strong>No cameras are configured</strong><span>Choose Set up camera to add a camera source.</span></div>}
       </section>
       {setupOpen && <Modal title={cameraForm.id ? "Configure camera" : "Set up camera"} onClose={closeSetup} wide>
@@ -462,7 +537,7 @@ export default function MonitoringPage() {
           <label>Camera name<input value={cameraForm.name} onChange={(event) => setCameraForm({ ...cameraForm, name: event.target.value })} placeholder="East wing entrance" maxLength={120} required /></label>
           <label>Location<input value={cameraForm.location} onChange={(event) => setCameraForm({ ...cameraForm, location: event.target.value })} placeholder="East wing, ground floor" maxLength={160} required /></label>
           <label>Associate room<select value={cameraForm.room} onChange={(event) => setCameraForm({ ...cameraForm, room: event.target.value })}><option value="">Common area / no room</option>{rooms.map((room) => <option key={room.id} value={room.id}>Room {room.number}</option>)}</select></label>
-          {cameraForm.source_type === "webcam" ? <label>Connected browser camera<select value={cameraForm.deviceId} onChange={(event) => setCameraForm({ ...cameraForm, deviceId: event.target.value })} required><option value="">Select a connected camera</option>{devices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}</select></label> : <label>RTSP stream URL<input type="password" autoComplete="new-password" value={cameraForm.stream_url} onChange={(event) => setCameraForm({ ...cameraForm, stream_url: event.target.value })} placeholder="rtsp://user:password@192.168.1.100:554/stream" maxLength={500} required={!cameraForm.has_stream_url} /><small>{cameraForm.has_stream_url ? "Leave blank to keep the saved URL. " : ""}Use the stream path supplied by your camera manufacturer. Credentials are never returned by the API.</small></label>}
+          {cameraForm.source_type === "webcam" ? <label>Connected browser camera<select value={cameraForm.deviceId} onChange={(event) => setCameraForm({ ...cameraForm, deviceId: event.target.value })} required><option value="">Select a connected camera</option>{assignableDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}</select><small>{devices.length > 0 && assignableDevices.length === 0 ? "All discovered cameras are assigned. Connect another camera or edit an existing source." : "Each browser camera can be assigned to one stream."}</small></label> : <label>RTSP stream URL<input type="password" autoComplete="new-password" value={cameraForm.stream_url} onChange={(event) => setCameraForm({ ...cameraForm, stream_url: event.target.value })} placeholder="rtsp://user:password@192.168.1.100:554/stream" maxLength={500} required={!cameraForm.has_stream_url} /><small>{cameraForm.has_stream_url ? "Leave blank to keep the saved URL. " : ""}Use the stream path supplied by your camera manufacturer. Credentials are never returned by the API.</small></label>}
           <div className="form-actions span-2"><button className="button subtle" type="button" disabled={savingCamera} onClick={closeSetup}>Cancel</button>{cameraForm.id && <button className="button danger-button" type="button" disabled={savingCamera} onClick={() => removeCamera(sources.find((source) => source.id === cameraForm.id))}><Trash2 size={17} />Remove</button>}<button className="button primary" disabled={savingCamera || discoveringDevices}>{savingCamera ? "Saving..." : <>{cameraForm.id ? <Settings2 size={17} /> : <Plus size={17} />}{cameraForm.id ? "Save changes" : "Add camera"}</>}</button></div>
         </form>
       </Modal>}

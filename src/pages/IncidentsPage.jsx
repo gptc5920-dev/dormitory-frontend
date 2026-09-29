@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, Eye, Link2, Plus, Search, X } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
@@ -7,6 +8,8 @@ import Modal from "../components/Modal";
 const typeLabels = { person: "Person detected", bottle: "Bottle detected", possible_smoke: "Possible smoke", possible_fire: "Possible fire", manual: "Manual report", other: "Other" };
 
 export default function IncidentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const linkedIncident = searchParams.get("incident");
   const [items, setItems] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -28,6 +31,15 @@ export default function IncidentsPage() {
     } catch (err) { setError(err.message); } finally { setLoading(false); }
   }, [filters]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const id = Number(linkedIncident);
+    if (!linkedIncident || !Number.isSafeInteger(id) || id < 1) return undefined;
+    let active = true;
+    api(`/incidents/${id}/`).then((item) => {
+      if (active) { setSelected(item); setModal("detail"); setError(""); }
+    }).catch((err) => { if (active) setError(err.message); });
+    return () => { active = false; };
+  }, [linkedIncident]);
 
   async function action(item, name, payload = {}) {
     setError(""); setSuccess("");
@@ -51,7 +63,15 @@ export default function IncidentsPage() {
     setModal("detail"); setAssign({ tenant: "", notes: "" });
   }
 
-  function inspect(item) { setSelected(item); setModal("detail"); setError(""); }
+  function inspect(item) {
+    if (linkedIncident) setSearchParams((current) => { const next = new URLSearchParams(current); next.delete("incident"); return next; }, { replace: true });
+    setSelected(item); setModal("detail"); setError("");
+  }
+
+  function closeDetail() {
+    setModal(null);
+    if (linkedIncident) setSearchParams((current) => { const next = new URLSearchParams(current); next.delete("incident"); return next; }, { replace: true });
+  }
 
   return <div className="page">
     <header className="page-header"><div><p className="eyebrow">Review queue</p><h1>Incidents</h1></div><button className="button primary" onClick={() => setModal("manual")}><Plus size={17} />Manual incident</button></header>
@@ -68,7 +88,7 @@ export default function IncidentsPage() {
       <div className="form-actions span-2"><button className="button subtle" type="button" onClick={() => setModal(null)}>Cancel</button><button className="button primary">Record incident</button></div>
     </form></Modal>}
 
-    {modal === "detail" && selected && <Modal title={`Review ${selected.reference}`} onClose={() => setModal(null)} wide>
+    {modal === "detail" && selected && <Modal title={`Review ${selected.reference}`} onClose={closeDetail} wide>
       <div className="incident-detail">
         <div className="evidence-frame">{selected.snapshot ? <img src={assetUrl(selected.snapshot)} alt={`Evidence for ${selected.reference}`} /> : <div className="empty-image"><Eye size={24} /><span>No snapshot attached</span></div>}</div>
         <div className="detail-list"><div><span>Detection</span><strong>{typeLabels[selected.incident_type]}</strong></div><div><span>Status</span><strong><span className={`status ${selected.status}`}>{selected.status}</span></strong></div><div><span>Source</span><strong>{selected.source_display}</strong></div><div><span>Room</span><strong>{selected.room_number || "Not specified"}</strong></div><div><span>Occurred</span><strong>{formatDate(selected.occurred_at)}</strong></div><div><span>Assigned tenant</span><strong>{selected.assigned_tenant_name || "Not assigned"}</strong></div></div>

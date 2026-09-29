@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, ScrollText, ShieldCheck, Users, X } from "lucide-react";
+import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, MonitorPlay, ScrollText, ShieldCheck, Users, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
 const links = [
   ["/", "Dashboard", Gauge], ["/tenants", "Tenants", Users],
   ["/rooms", "Rooms", Building2], ["/rules", "Dormitory rules", ScrollText],
   ["/incidents", "Incidents", ClipboardList], ["/records", "Warnings & violations", BellRing],
-  ["/monitoring", "Monitoring", Camera], ["/reports", "Reports", FileBarChart],
+  ["/monitoring", "Monitoring", Camera], ["/camera-wall", "Camera Wall", MonitorPlay], ["/reports", "Reports", FileBarChart],
 ];
 
 function Navigation({ onNavigate }) {
