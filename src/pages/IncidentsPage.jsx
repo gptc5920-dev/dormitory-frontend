@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, Link2, Plus, Search, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
+import ResetButton from "../components/ResetButton";
 
-const typeLabels = { person: "Person detected", bottle: "Bottle detected", possible_smoke: "Possible smoke", possible_fire: "Possible fire", manual: "Manual report", other: "Other" };
+const typeLabels = { person: "Person detected", bottle: "Bottle detected", possible_drinking: "Possible drinking gesture", possible_smoke: "Possible smoke", possible_fire: "Possible fire", manual: "Manual report", other: "Other" };
 
 export default function IncidentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -21,14 +22,17 @@ export default function IncidentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
+  const loadRequestRef = useRef(0);
 
   const load = useCallback(async () => {
+    const request = ++loadRequestRef.current;
     setLoading(true);
     try {
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       const [incidentData, tenantData, roomData] = await Promise.all([apiList(`/incidents/?${query}`), apiList("/tenants/?active=true&page_size=200"), apiList("/rooms/?active=true&page_size=200")]);
-      setItems(rows(incidentData)); setTenants(rows(tenantData)); setRooms(rows(roomData));
-    } catch (err) { setError(err.message); } finally { setLoading(false); }
+      if (request === loadRequestRef.current) { setItems(rows(incidentData)); setTenants(rows(tenantData)); setRooms(rows(roomData)); }
+    } catch (err) { if (request === loadRequestRef.current) setError(err.message); } finally { if (request === loadRequestRef.current) setLoading(false); }
   }, [filters]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -51,16 +55,21 @@ export default function IncidentsPage() {
 
   async function createManual(event) {
     event.preventDefault();
+    if (saving) return;
+    setSaving(true); setError("");
     try {
       await api("/incidents/", { method: "POST", body: JSON.stringify({ ...manual, room: manual.room ? Number(manual.room) : null }) });
       setModal(null); setManual({ incident_type: "manual", details: "", room: "" }); setSuccess("Manual incident recorded."); await load();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
 
   async function assignTenant(event) {
     event.preventDefault();
+    if (saving) return;
+    setSaving(true);
     await action(selected, "assign", { tenant: Number(assign.tenant), notes: assign.notes });
     setModal("detail"); setAssign({ tenant: "", notes: "" });
+    setSaving(false);
   }
 
   function inspect(item) {
@@ -75,7 +84,7 @@ export default function IncidentsPage() {
 
   return <div className="page">
     <header className="page-header"><div><p className="eyebrow">Review queue</p><h1>Incidents</h1></div><button className="button primary" onClick={() => setModal("manual")}><Plus size={17} />Manual incident</button></header>
-    <div className="toolbar filter-bar"><Search size={17} /><select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="new">New</option><option value="reviewed">Reviewed</option><option value="verified">Verified</option><option value="assigned">Assigned</option><option value="dismissed">Dismissed</option></select><select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All detection types</option>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><span>{items.length} incidents</span></div>
+    <div className="toolbar filter-bar"><Search size={17} /><select aria-label="Incident status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="new">New</option><option value="reviewed">Reviewed</option><option value="verified">Verified</option><option value="assigned">Assigned</option><option value="dismissed">Dismissed</option></select><select aria-label="Detection type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All detection types</option>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ResetButton filters onClick={() => { setFilters({ status: "", type: "" }); setError(""); setSuccess(""); }} /><span>{items.length} incidents</span></div>
     <ErrorMessage message={!modal ? error : ""} /><SuccessMessage message={success} />
     {loading ? <Loading /> : items.length === 0 ? <Empty title="No incidents found" detail="The selected queue is clear." /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Incident</th><th>Source / room</th><th>Confidence</th><th>Occurred</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
       {items.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{typeLabels[item.incident_type]}</strong><small className="cell-detail">{item.details}</small></td><td>{item.room_number ? `Room ${item.room_number}` : item.source_display}</td><td>{item.confidence == null ? "-" : `${Math.round(item.confidence * 100)}%`}</td><td>{formatDate(item.occurred_at)}</td><td><span className={`status ${item.status}`}>{item.status}</span></td><td><button className="icon-button" title="Review incident" onClick={() => inspect(item)}><Eye size={17} /></button></td></tr>)}
@@ -85,7 +94,7 @@ export default function IncidentsPage() {
       <label>Incident type<select value={manual.incident_type} onChange={(e) => setManual({ ...manual, incident_type: e.target.value })}>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       <label>Room<select value={manual.room} onChange={(e) => setManual({ ...manual, room: e.target.value })}><option value="">No room</option>{rooms.map((room) => <option key={room.id} value={room.id}>Room {room.number}</option>)}</select></label>
       <label className="span-2">Details<textarea rows="5" value={manual.details} onChange={(e) => setManual({ ...manual, details: e.target.value })} required /></label><ErrorMessage message={error} />
-      <div className="form-actions span-2"><button className="button subtle" type="button" onClick={() => setModal(null)}>Cancel</button><button className="button primary">Record incident</button></div>
+      <div className="form-actions span-2"><button className="button subtle" type="button" onClick={() => setModal(null)}>Cancel</button><ResetButton disabled={saving} onClick={() => { setManual({ incident_type: "manual", details: "", room: "" }); setError(""); setSuccess(""); }} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Record incident"}</button></div>
     </form></Modal>}
 
     {modal === "detail" && selected && <Modal title={`Review ${selected.reference}`} onClose={closeDetail} wide>
@@ -103,6 +112,6 @@ export default function IncidentsPage() {
       </div>
     </Modal>}
 
-    {modal === "assign" && selected && <Modal title={`Assign ${selected.reference}`} onClose={() => setModal("detail")}><form className="form-stack" onSubmit={assignTenant}><label>Tenant<select value={assign.tenant} onChange={(e) => setAssign({ ...assign, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.reference} · {tenant.full_name} · Room {tenant.room_number}</option>)}</select></label><label>Assignment notes<textarea rows="3" value={assign.notes} onChange={(e) => setAssign({ ...assign, notes: e.target.value })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal("detail")}>Back</button><button className="button primary">Assign incident</button></div></form></Modal>}
+    {modal === "assign" && selected && <Modal title={`Assign ${selected.reference}`} onClose={() => setModal("detail")}><form className="form-stack" onSubmit={assignTenant}><label>Tenant<select value={assign.tenant} onChange={(e) => setAssign({ ...assign, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.reference} · {tenant.full_name} · Room {tenant.room_number}</option>)}</select></label><label>Assignment notes<textarea rows="3" value={assign.notes} onChange={(e) => setAssign({ ...assign, notes: e.target.value })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal("detail")}>Back</button><ResetButton disabled={saving} onClick={() => { setAssign({ tenant: "", notes: "" }); setError(""); setSuccess(""); }} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Assign incident"}</button></div></form></Modal>}
   </div>;
 }

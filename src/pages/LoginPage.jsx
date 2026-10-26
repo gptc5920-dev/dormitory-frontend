@@ -1,11 +1,13 @@
 import { useState } from "react";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { ErrorMessage } from "../components/Feedback";
 import { useAuth } from "../context/AuthContext";
+import ResetButton from "../components/ResetButton";
 
 export default function LoginPage() {
   const { login } = useAuth();
   const [form, setForm] = useState({ username: "manager", password: "Manager123!" });
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -33,9 +35,18 @@ export default function LoginPage() {
         </div>
         <form onSubmit={submit} className="form-stack">
           <label>Username<input autoFocus value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} required /></label>
-          <label>Password<input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required /></label>
+          <div className="login-password-field">
+            <label htmlFor="login-password">Password</label>
+            <div className="login-password-input">
+              <input id="login-password" type={showPassword ? "text" : "password"} autoComplete="current-password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+              <button type="button" className="login-password-toggle" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
+          </div>
           <ErrorMessage message={error} />
           <button className="button primary full" disabled={busy}>{busy ? "Signing in..." : "Sign in"}<ArrowRight size={18} /></button>
+          <ResetButton disabled={busy} onClick={() => { setForm({ username: "", password: "" }); setShowPassword(false); setError(""); }} />
         </form>
         <p className="login-note">Demo credentials are prefilled for local development.</p>
       </section>

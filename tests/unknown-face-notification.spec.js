@@ -18,13 +18,13 @@ test("an unrecognized face raises one dismissible notification during a continuo
   await page.goto("/monitoring");
   const camera = page.locator(".camera-stream-card");
   await camera.getByRole("button", { name: "Start stream" }).click();
-  await camera.getByRole("button", { name: "Start detection" }).click();
-  const alerts = page.getByRole("alert").filter({ hasText: "Unrecognized face detected" });
+  await expect(camera.getByRole("button", { name: "Stop detection" })).toBeEnabled();
+  const alerts = page.getByRole("alert").filter({ hasText: "Possible unauthorized person" });
   await expect(alerts).toHaveCount(1);
   await expect(alerts.first()).toContainText("Lobby camera");
   await page.waitForTimeout(3500);
   await expect(alerts).toHaveCount(1);
-  await alerts.first().getByRole("button", { name: "Dismiss unrecognized face notification" }).click();
+  await alerts.first().getByRole("button", { name: "Dismiss unauthorized person warning" }).click();
   await expect(alerts).toHaveCount(0);
 });
 
@@ -59,6 +59,6 @@ test("a browser webcam scan also raises an unrecognized-face notification", asyn
   await page.goto("/monitoring");
   const camera = page.locator(".camera-stream-card");
   await camera.getByRole("button", { name: "Start stream" }).click();
-  await camera.getByRole("button", { name: "Start detection" }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Unrecognized face detected" })).toContainText("West webcam");
+  await expect(camera.getByRole("button", { name: "Stop detection" })).toBeEnabled();
+  await expect(page.getByRole("alert").filter({ hasText: "Possible unauthorized person" })).toContainText("West webcam");
 });

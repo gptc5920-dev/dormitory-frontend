@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BellRing, Camera, CircleStop, MonitorPlay, Play, Plus, ScanLine, Settings2, Trash2, Upload, Video, X } from "lucide-react";
+import { BellRing, Camera, CircleStop, MonitorPlay, Play, Plus, ScanLine, Settings2, Trash2, Upload, Video } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api, apiList, rows } from "../api";
 import { ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import NetworkCameraStream from "../components/NetworkCameraStream";
 import Modal from "../components/Modal";
+import ResetButton from "../components/ResetButton";
 import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
+import { useCameraAlerts } from "../context/CameraAlertsContext";
 
 const CAMERA_BINDINGS_KEY = "dormitory_camera_device_bindings";
+const blankUpload = { file: null, room: "", source_name: "Uploaded corridor video" };
 
 function readCameraBindings() {
   try {
@@ -31,7 +34,7 @@ function emptyCameraForm(source, deviceId = "") {
   };
 }
 
-function CameraStream({ source, deviceId, onConfigure, registerController, onUnknownFace, onActivity }) {
+function CameraStream({ source, deviceId, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -40,6 +43,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
   const timerRef = useRef(null);
   const busyRef = useRef(false);
   const cameraSessionRef = useRef(0);
+  const detectionSessionRef = useRef(0);
   const unknownFaceRef = useRef(createUnknownFaceTracker());
   const [cameraOn, setCameraOn] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -52,6 +56,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
   const stopCamera = useCallback(() => {
     startingRef.current = false;
     cameraSessionRef.current += 1;
+    detectionSessionRef.current += 1;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = null;
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -98,8 +103,8 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
       stream = await navigator.mediaDevices.getUserMedia({
         video: {
           deviceId: { exact: deviceId },
-          width: { ideal: 960 },
-          height: { ideal: 540 },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
           frameRate: { ideal: 20, max: 24 },
         },
         audio: false,
@@ -133,6 +138,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
       if (session !== cameraSessionRef.current) return;
       setFocusLabel(nextFocusLabel);
       setCameraOn(true);
+      setScanning(true);
       requestAnimationFrame(updateVideoViewport);
     } catch (err) {
       stream?.getTracks().forEach((track) => track.stop());
@@ -150,22 +156,24 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
     if (busyRef.current || !videoRef.current?.videoWidth) return;
     busyRef.current = true;
     const session = cameraSessionRef.current;
+    const detectionSession = detectionSessionRef.current;
     setAnalyzing(true);
     try {
       const canvas = canvasRef.current;
-      const scale = Math.min(1, 960 / videoRef.current.videoWidth);
+      const scale = Math.min(1, 1280 / videoRef.current.videoWidth);
       canvas.width = Math.max(1, Math.round(videoRef.current.videoWidth * scale));
       canvas.height = Math.max(1, Math.round(videoRef.current.videoHeight * scale));
       canvas.getContext("2d").drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.75));
-      if (session !== cameraSessionRef.current) return;
+      if (session !== cameraSessionRef.current || detectionSession !== detectionSessionRef.current) return;
       if (!blob) throw new Error("The browser could not capture a camera frame.");
       const body = new FormData();
       body.append("frame", blob, `${source.name.toLowerCase().replaceAll(" ", "-") || "camera"}-frame.jpg`);
       body.append("source", String(source.id));
       const nextResult = await api("/monitoring/detect-frame/", { method: "POST", body });
-      if (session === cameraSessionRef.current && streamRef.current) {
+      if (session === cameraSessionRef.current && detectionSession === detectionSessionRef.current && streamRef.current) {
         setResult(nextResult);
+        if (nextResult.model) onModelStatus(nextResult.model);
         if (nextResult.incidents_created?.length) onActivity({ source, incidents: nextResult.incidents_created });
         if (!nextResult.face_recognition_error) {
           const count = trackUnknownFaces(unknownFaceRef.current, nextResult.faces);
@@ -173,27 +181,35 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
         }
       }
     } catch (err) {
-      if (session === cameraSessionRef.current) setError(err.message);
+      if (session === cameraSessionRef.current && detectionSession === detectionSessionRef.current) setError(err.message);
     } finally {
       if (session === cameraSessionRef.current) {
         busyRef.current = false;
         setAnalyzing(false);
       }
     }
-  }, [source, onUnknownFace, onActivity]);
+  }, [source, onUnknownFace, onActivity, onModelStatus]);
 
   const toggleScanning = useCallback(() => {
     if (scanning) {
+      detectionSessionRef.current += 1;
       clearInterval(timerRef.current);
       timerRef.current = null;
       resetUnknownFaceTracker(unknownFaceRef.current);
-      setScanning(false);
-      return;
     }
+    setScanning(!scanning);
+  }, [scanning]);
+
+  useEffect(() => {
+    if (!cameraOn || !scanning) return undefined;
     captureFrame();
     timerRef.current = setInterval(captureFrame, 3000);
-    setScanning(true);
-  }, [captureFrame, scanning]);
+    return () => {
+      detectionSessionRef.current += 1;
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    };
+  }, [cameraOn, scanning, captureFrame]);
 
   useEffect(() => {
     registerController(source.id, { startCamera, stopCamera });
@@ -268,9 +284,9 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
 
 export default function MonitoringPage() {
   const controllersRef = useRef(new Map());
-  const alertIdRef = useRef(0);
+  const { notify: pushCameraAlert } = useCameraAlerts();
   const [setupOpen, setSetupOpen] = useState(false);
-  const [cameraAlerts, setCameraAlerts] = useState([]);
+  const [detectorInfoOpen, setDetectorInfoOpen] = useState(false);
   const [desktopPermission, setDesktopPermission] = useState(() => window.Notification?.permission || "unsupported");
   const [status, setStatus] = useState(null);
   const [rooms, setRooms] = useState([]);
@@ -282,23 +298,18 @@ export default function MonitoringPage() {
   const [discoveringDevices, setDiscoveringDevices] = useState(false);
   const [cameraForm, setCameraForm] = useState(() => emptyCameraForm());
   const [savingCamera, setSavingCamera] = useState(false);
-  const [upload, setUpload] = useState({ file: null, room: "", source_name: "Uploaded corridor video" });
+  const [upload, setUpload] = useState(blankUpload);
+  const uploadRef = useRef(null);
   const [job, setJob] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const pushCameraAlert = useCallback(({ title, detail, tag, incidentId }) => {
-    setCameraAlerts((current) => [{ id: ++alertIdRef.current, title, detail, incidentId }, ...current].slice(0, 5));
-    if (window.Notification?.permission === "granted") {
-      try { new window.Notification(title, { body: detail, tag }); } catch { /* In-app alert remains available. */ }
-    }
-  }, []);
-
   const notifyUnknownFace = useCallback(({ source, count }) => {
     pushCameraAlert({
-      title: "Unrecognized face detected",
-      detail: `${count} face${count === 1 ? "" : "s"} could not be matched at ${source.name}${source.location ? ` (${source.location})` : ""}. Review the camera before acting.`,
+      kind: "unauthorized",
+      title: "Possible unauthorized person",
+      detail: `${count} face${count === 1 ? "" : "s"} at ${source.name}${source.location ? ` (${source.location})` : ""} could not be matched to a registered active tenant. Check the camera and confirm whether the person has permission to be here.`,
       tag: `unknown-face-${source.id}`,
     });
   }, [pushCameraAlert]);
@@ -509,23 +520,21 @@ export default function MonitoringPage() {
   const assignableDevices = devices.filter((device) => !Object.entries(bindings).some(([sourceId, boundDevice]) => Number(sourceId) !== cameraForm.id && boundDevice === device.deviceId));
 
   return <div className="page">
-    <div className="camera-notifications" aria-label="Camera notifications">
-      {cameraAlerts.map((alert) => <div key={alert.id} className="camera-notification" role="alert">
-        <BellRing size={19} aria-hidden="true" /><div><strong>{alert.title}</strong><p>{alert.detail}</p>{alert.incidentId && <Link to={`/incidents?incident=${alert.incidentId}`}>Review incident</Link>}</div>
-        <button className="icon-button" type="button" aria-label={alert.incidentId ? "Dismiss camera activity notification" : "Dismiss unrecognized face notification"} onClick={() => setCameraAlerts((current) => current.filter((item) => item.id !== alert.id))}><X size={17} /></button>
-      </div>)}
-    </div>
-    <header className="page-header"><div><p className="eyebrow">Camera operations</p><h1>Monitoring</h1></div><span className={`status ${status?.weights_available ? "verified" : "reviewed"}`}>{status?.weights_available ? "YOLO Nano ready" : "Fallback mode"}</span></header>
+    <header className="page-header"><div><p className="eyebrow">Camera operations</p><h1>Monitoring</h1></div><div className="camera-toolbar-actions"><span className={`status ${status?.capabilities?.bottle?.ready ? "verified" : "reviewed"}`}>{status?.capabilities?.bottle?.ready ? "Bottle detection ready" : status ? "Check detection setup" : "Checking detection"}</span><button type="button" className="button subtle small" disabled={!status} onClick={() => setDetectorInfoOpen(true)}><ScanLine size={16} />Detection details</button></div></header>
     <ErrorMessage message={setupOpen ? "" : error} />
     <SuccessMessage message={success} />
     {!status ? <Loading label="Checking detector" /> : <>
-      <section className="model-banner"><ScanLine size={21} /><div><strong>{status.mode}</strong><span>{status.notice}</span></div></section>
+      {detectorInfoOpen && <Modal title="Detection details" onClose={() => setDetectorInfoOpen(false)}>
+        <section className="model-banner"><ScanLine size={21} /><div><strong>{status.mode}</strong><span>{status.notice}</span></div></section>
+        {status.capabilities && <div className="detector-capabilities">{[["bottle", "Bottle detection"], ["smoke", "Smoke detection"], ["possible_drinking", "Possible drinking gesture"]].map(([key, label]) => <section key={key} aria-label={label}><div><strong>{label}</strong><span className={`status ${status.capabilities[key]?.ready ? "verified" : "reviewed"}`}>{status.capabilities[key]?.ready ? "Ready" : "Unavailable"}</span></div><p>{status.capabilities[key]?.detail}</p></section>)}</div>}
+        <p className="muted">Face matching compares camera faces with registered active tenants. An unmatched face raises a possible unauthorized person warning for staff review.</p>
+      </Modal>}
       <section className="camera-toolbar panel">
-        <div><p className="eyebrow">Live cameras</p><h2>{configuredCount} of {browserSources.length} source{browserSources.length === 1 ? "" : "s"} configured</h2><span>Each source can stream and run detection independently.</span></div>
+        <div><p className="eyebrow">Live cameras</p><h2>{configuredCount} of {browserSources.length} source{browserSources.length === 1 ? "" : "s"} configured</h2><span>Detection starts automatically with each stream. Use Stop detection to pause scanning.</span></div>
         <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button>{desktopPermission === "default" && <button className="button subtle" type="button" onClick={enableDesktopAlerts}><BellRing size={17} />Enable desktop alerts</button>}{desktopPermission === "granted" && <span className="status verified">Desktop alerts on</span>}</div>
       </section>
       <section className="camera-stream-grid">
-        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} />)}
+        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} />)}
         {!browserSources.length && <div className="empty camera-empty"><Camera size={25} /><strong>No cameras are configured</strong><span>Choose Set up camera to add a camera source.</span></div>}
       </section>
       {setupOpen && <Modal title={cameraForm.id ? "Configure camera" : "Set up camera"} onClose={closeSetup} wide>
@@ -538,16 +547,19 @@ export default function MonitoringPage() {
           <label>Location<input value={cameraForm.location} onChange={(event) => setCameraForm({ ...cameraForm, location: event.target.value })} placeholder="East wing, ground floor" maxLength={160} required /></label>
           <label>Associate room<select value={cameraForm.room} onChange={(event) => setCameraForm({ ...cameraForm, room: event.target.value })}><option value="">Common area / no room</option>{rooms.map((room) => <option key={room.id} value={room.id}>Room {room.number}</option>)}</select></label>
           {cameraForm.source_type === "webcam" ? <label>Connected browser camera<select value={cameraForm.deviceId} onChange={(event) => setCameraForm({ ...cameraForm, deviceId: event.target.value })} required><option value="">Select a connected camera</option>{assignableDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}</select><small>{devices.length > 0 && assignableDevices.length === 0 ? "All discovered cameras are assigned. Connect another camera or edit an existing source." : "Each browser camera can be assigned to one stream."}</small></label> : <label>RTSP stream URL<input type="password" autoComplete="new-password" value={cameraForm.stream_url} onChange={(event) => setCameraForm({ ...cameraForm, stream_url: event.target.value })} placeholder="rtsp://user:password@192.168.1.100:554/stream" maxLength={500} required={!cameraForm.has_stream_url} /><small>{cameraForm.has_stream_url ? "Leave blank to keep the saved URL. " : ""}Use the stream path supplied by your camera manufacturer. Credentials are never returned by the API.</small></label>}
-          <div className="form-actions span-2"><button className="button subtle" type="button" disabled={savingCamera} onClick={closeSetup}>Cancel</button>{cameraForm.id && <button className="button danger-button" type="button" disabled={savingCamera} onClick={() => removeCamera(sources.find((source) => source.id === cameraForm.id))}><Trash2 size={17} />Remove</button>}<button className="button primary" disabled={savingCamera || discoveringDevices}>{savingCamera ? "Saving..." : <>{cameraForm.id ? <Settings2 size={17} /> : <Plus size={17} />}{cameraForm.id ? "Save changes" : "Add camera"}</>}</button></div>
+          <div className="form-actions span-2"><button className="button subtle" type="button" disabled={savingCamera} onClick={closeSetup}>Cancel</button><ResetButton disabled={savingCamera || discoveringDevices} onClick={() => { setCameraForm(emptyCameraForm(sources.find((source) => source.id === cameraForm.id), bindings[cameraForm.id] || "")); setError(""); setSuccess(""); }} />{cameraForm.id && <button className="button danger-button" type="button" disabled={savingCamera} onClick={() => removeCamera(sources.find((source) => source.id === cameraForm.id))}><Trash2 size={17} />Remove</button>}<button className="button primary" disabled={savingCamera || discoveringDevices}>{savingCamera ? "Saving..." : <>{cameraForm.id ? <Settings2 size={17} /> : <Plus size={17} />}{cameraForm.id ? "Save changes" : "Add camera"}</>}</button></div>
         </form>
       </Modal>}
       <section className="upload-band">
         <div><p className="eyebrow">Recorded footage</p><h2>Analyze uploaded video</h2></div>
         <form className="upload-form" onSubmit={processUpload}>
-          <label>Video file<input type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" onChange={(event) => setUpload({ ...upload, file: event.target.files[0] || null })} required /></label>
+          <label>Video file<input ref={uploadRef} type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" onChange={(event) => setUpload({ ...upload, file: event.target.files[0] || null })} required /></label>
           <label>Source label<input value={upload.source_name} onChange={(event) => setUpload({ ...upload, source_name: event.target.value })} required /></label>
           <label>Room<select value={upload.room} onChange={(event) => setUpload({ ...upload, room: event.target.value })}><option value="">Common area / no room</option>{rooms.map((room) => <option key={room.id} value={room.id}>Room {room.number}</option>)}</select></label>
-          <button className="button primary" disabled={processing}>{processing ? "Processing..." : <><Upload size={17} />Analyze video</>}</button>
+          <div className="form-actions">
+            <ResetButton disabled={processing} onClick={() => { setUpload({ ...blankUpload }); if (uploadRef.current) uploadRef.current.value = ""; setJob(null); setError(""); setSuccess(""); }} />
+            <button className="button primary" disabled={processing}>{processing ? "Processing..." : <><Upload size={17} />Analyze video</>}</button>
+          </div>
         </form>
         {job && <SuccessMessage message={`${job.status === "completed" ? "Analysis complete" : job.status}: ${job.frames_processed} sampled frames, ${job.incidents_created} incidents created.`} />}
       </section>

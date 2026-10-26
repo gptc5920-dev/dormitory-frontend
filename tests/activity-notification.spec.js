@@ -30,7 +30,7 @@ test("a new IP camera incident notifies once and opens the review record", async
   await page.goto("/monitoring");
   const camera = page.locator(".camera-stream-card");
   await camera.getByRole("button", { name: "Start stream" }).click();
-  await camera.getByRole("button", { name: "Start detection" }).click();
+  await expect(camera.getByRole("button", { name: "Stop detection" })).toBeEnabled();
   const alert = page.getByRole("alert").filter({ hasText: "Camera activity needs review" });
   await expect(alert).toHaveCount(1);
   await expect(alert).toContainText("possible fire");
@@ -70,6 +70,6 @@ test("a new webcam incident raises a camera activity notification", async ({ pag
   await page.goto("/monitoring");
   const camera = page.locator(".camera-stream-card");
   await camera.getByRole("button", { name: "Start stream" }).click();
-  await camera.getByRole("button", { name: "Start detection" }).click();
+  await expect(camera.getByRole("button", { name: "Stop detection" })).toBeEnabled();
   await expect(page.getByRole("alert").filter({ hasText: "Camera activity needs review" })).toContainText("West webcam");
 });

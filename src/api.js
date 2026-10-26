@@ -57,7 +57,9 @@ async function request(path, options) {
   }
   if (response.status < 200 || response.status >= 300) {
     if (response.status === 401) window.dispatchEvent(new Event("dormitory:unauthorized"));
-    throw new Error(describeError(body, `Request failed (${response.status})`));
+    const error = new Error(describeError(body, `Request failed (${response.status})`));
+    error.status = response.status;
+    throw error;
   }
   return body;
 }

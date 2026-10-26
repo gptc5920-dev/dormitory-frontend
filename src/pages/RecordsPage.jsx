@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertOctagon, BellRing, FilePlus2, Plus } from "lucide-react";
 import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
+import ResetButton from "../components/ResetButton";
 
 const blankWarning = { tenant: "", rule: "", incident: "", message: "" };
 const blankViolation = { tenant: "", rule: "", incident: "", description: "", action_taken: "", evidence: null };
@@ -20,6 +21,17 @@ export default function RecordsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [saving, setSaving] = useState(false);
+  const evidenceRef = useRef(null);
+
+  function resetForm() {
+    if (modal === "warning") setWarningForm({ ...blankWarning });
+    else {
+      setViolationForm({ ...blankViolation });
+      if (evidenceRef.current) evidenceRef.current.value = "";
+    }
+    setError(""); setSuccess("");
+  }
 
   const load = useCallback(async () => {
     try {
@@ -37,16 +49,20 @@ export default function RecordsPage() {
   }
 
   async function createWarning(event) {
-    event.preventDefault(); setError("");
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true); setError("");
     try {
       const payload = { ...warningForm, tenant: Number(warningForm.tenant), rule: Number(warningForm.rule), incident: warningForm.incident ? Number(warningForm.incident) : null };
       await api("/warnings/", { method: "POST", body: JSON.stringify(payload) });
       setWarningForm(blankWarning); setModal(null); setSuccess("Warning issued with a rule reference."); await load();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
 
   async function createViolation(event) {
-    event.preventDefault(); setError("");
+    event.preventDefault();
+    if (saving) return;
+    setSaving(true); setError("");
     const body = new FormData();
     body.append("tenant", violationForm.tenant); body.append("rule", violationForm.rule);
     if (violationForm.incident) body.append("incident", violationForm.incident);
@@ -55,7 +71,7 @@ export default function RecordsPage() {
     try {
       await api("/violations/", { method: "POST", body });
       setViolationForm(blankViolation); setModal(null); setSuccess("Violation and evidence recorded."); await load();
-    } catch (err) { setError(err.message); }
+    } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
 
   return <div className="page">
@@ -72,7 +88,7 @@ export default function RecordsPage() {
       <label>Verified incident (optional)<select value={warningForm.incident} onChange={(e) => chooseIncident(warningForm, setWarningForm, e.target.value)}><option value="">No linked incident</option>{incidents.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.assigned_tenant_name}</option>)}</select></label>
       <label>Tenant<select value={warningForm.tenant} onChange={(e) => setWarningForm({ ...warningForm, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.full_name}</option>)}</select></label>
       <label>Dormitory rule<select value={warningForm.rule} onChange={(e) => setWarningForm({ ...warningForm, rule: e.target.value })} required><option value="">Select rule</option>{rules.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title}</option>)}</select></label>
-      <label>Warning message<textarea rows="4" value={warningForm.message} onChange={(e) => setWarningForm({ ...warningForm, message: e.target.value })} required /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal(null)}>Cancel</button><button className="button primary">Issue warning</button></div>
+      <label>Warning message<textarea rows="4" value={warningForm.message} onChange={(e) => setWarningForm({ ...warningForm, message: e.target.value })} required /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal(null)}>Cancel</button><ResetButton disabled={saving} onClick={resetForm} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Issue warning"}</button></div>
     </form></Modal>}
 
     {modal === "violation" && <Modal title="Record violation" onClose={() => setModal(null)}><form className="form-stack" onSubmit={createViolation}>
@@ -81,7 +97,7 @@ export default function RecordsPage() {
       <label>Dormitory rule<select value={violationForm.rule} onChange={(e) => setViolationForm({ ...violationForm, rule: e.target.value })} required><option value="">Select rule</option>{rules.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title}</option>)}</select></label>
       <label>Description<textarea rows="4" value={violationForm.description} onChange={(e) => setViolationForm({ ...violationForm, description: e.target.value })} required /></label>
       <label>Action taken<input value={violationForm.action_taken} onChange={(e) => setViolationForm({ ...violationForm, action_taken: e.target.value })} /></label>
-      <label>Evidence image<input type="file" accept="image/*" onChange={(e) => setViolationForm({ ...violationForm, evidence: e.target.files[0] || null })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal(null)}>Cancel</button><button className="button primary">Record violation</button></div>
+      <label>Evidence image<input ref={evidenceRef} type="file" accept="image/*" onChange={(e) => setViolationForm({ ...violationForm, evidence: e.target.files[0] || null })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal(null)}>Cancel</button><ResetButton disabled={saving} onClick={resetForm} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Record violation"}</button></div>
     </form></Modal>}
   </div>;
 }

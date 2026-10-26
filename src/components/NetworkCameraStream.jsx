@@ -3,11 +3,12 @@ import { api } from "../api";
 import { CircleStop, Play, ScanLine, Settings2, Wifi } from "lucide-react";
 import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
 
-export default function NetworkCameraStream({ source, onConfigure, registerController, onUnknownFace, onActivity }) {
+export default function NetworkCameraStream({ source, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus }) {
   const session = useRef(0);
   const timer = useRef(null);
   const active = useRef(false);
   const detect = useRef(false);
+  const detectionSession = useRef(0);
   const unknownFaceRef = useRef(createUnknownFaceTracker());
   const [state, setState] = useState("Ready");
   const [image, setImage] = useState("");
@@ -20,6 +21,7 @@ export default function NetworkCameraStream({ source, onConfigure, registerContr
     session.current += 1;
     clearTimeout(timer.current);
     detect.current = false;
+    detectionSession.current += 1;
     setScanning(false);
     setState("Ready");
     setImage("");
@@ -30,20 +32,24 @@ export default function NetworkCameraStream({ source, onConfigure, registerContr
   const startCamera = useCallback(async () => {
     if (active.current) return;
     active.current = true;
+    detect.current = true;
+    setScanning(true);
     const current = ++session.current;
     setState("Connecting");
     setError("");
     async function refresh() {
       try {
         const analyzing = detect.current;
+        const scanSession = detectionSession.current;
         const data = await api(`/camera-sources/${source.id}/snapshot/`, {
           method: "POST", body: JSON.stringify({ detect: analyzing, preview_width: analyzing ? 1280 : 960 }),
         });
         if (current !== session.current) return;
         setImage(data.image);
         setState("Live");
-        if (analyzing) {
+        if (analyzing && detect.current && scanSession === detectionSession.current) {
           setResult(data);
+          if (data.model) onModelStatus(data.model);
           if (data.incidents_created?.length) onActivity({ source, incidents: data.incidents_created });
           if (!data.face_recognition_error) {
             const count = trackUnknownFaces(unknownFaceRef.current, data.faces);
@@ -58,7 +64,7 @@ export default function NetworkCameraStream({ source, onConfigure, registerContr
       }
     }
     await refresh();
-  }, [source, stopCamera, onUnknownFace, onActivity]);
+  }, [source, stopCamera, onUnknownFace, onActivity, onModelStatus]);
 
   useEffect(() => {
     registerController(source.id, { startCamera, stopCamera });
@@ -76,10 +82,10 @@ export default function NetworkCameraStream({ source, onConfigure, registerContr
     <div className="camera-stream-controls">
       {state === "Ready" ? <button className="button primary" disabled={!source.has_stream_url} onClick={startCamera}><Play size={17} aria-hidden="true" />Start stream</button> : <>
         <button className="button subtle" onClick={stopCamera}><CircleStop size={17} aria-hidden="true" />Stop stream</button>
-        <button className="button primary" disabled={state !== "Live"} onClick={() => { detect.current = !detect.current; if (!detect.current) resetUnknownFaceTracker(unknownFaceRef.current); setScanning(detect.current); }}>{scanning ? <CircleStop size={17} aria-hidden="true" /> : <ScanLine size={17} aria-hidden="true" />}{scanning ? "Stop detection" : "Start detection"}</button>
+        <button className="button primary" disabled={state !== "Live"} onClick={() => { detect.current = !detect.current; detectionSession.current += 1; if (!detect.current) resetUnknownFaceTracker(unknownFaceRef.current); setScanning(detect.current); }}>{scanning ? <CircleStop size={17} aria-hidden="true" /> : <ScanLine size={17} aria-hidden="true" />}{scanning ? "Stop detection" : "Start detection"}</button>
       </>}
     </div>
-    <p className="muted">Preview refreshes 3 seconds after each frame arrives.</p>
+    <p className="muted">Detection starts automatically with the stream. Frames refresh 3 seconds after each response.</p>
     {error && <p className="camera-error">{error}</p>}
     <div className="camera-result"><strong>Latest scan</strong><span>{result ? result.detections.map(item => item.label).join(", ") || "No target cues detected" : "No frame analyzed yet."}</span>{result?.faces?.length > 0 && <small>Faces: {result.faces.map((face) => face.tenant_name ? `Possible match: ${face.tenant_name}` : "Unknown").join(", ")}. Confirm any match before acting.</small>}{result?.face_recognition_error && <small>Face matching unavailable: {result.face_recognition_error}</small>}{result && <small>{result.incidents_created.length} new incident(s) created.</small>}</div>
   </article>;

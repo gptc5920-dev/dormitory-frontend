@@ -68,7 +68,11 @@ test("preserves authentication and structured API errors", async () => {
     assert.equal(config.headers.get("Authorization"), "Token test-token");
     return Response.json({ username: ["Already exists."] }, { status: 400 });
   };
-  await assert.rejects(api("/users/", { method: "POST", body: "{}" }), /username: Already exists/);
+  await assert.rejects(api("/users/", { method: "POST", body: "{}" }), (error) => {
+    assert.match(error.message, /username: Already exists/);
+    assert.equal(error.status, 400);
+    return true;
+  });
 });
 
 test("preserves FormData uploads and empty responses", async () => {

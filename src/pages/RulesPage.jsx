@@ -3,6 +3,7 @@ import { Edit3, Plus } from "lucide-react";
 import { api, apiList, rows } from "../api";
 import { Empty, ErrorMessage, Loading } from "../components/Feedback";
 import Modal from "../components/Modal";
+import ResetButton from "../components/ResetButton";
 
 const blank = { code: "", title: "", category: "Conduct", description: "", severity: "medium", is_active: true };
 
@@ -40,7 +41,7 @@ export default function RulesPage() {
         <label className="check-field"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />Active rule</label>
         <label className="span-2">Description<textarea rows="4" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required /></label>
         <ErrorMessage message={error} />
-        <div className="form-actions span-2"><button type="button" className="button subtle" onClick={() => setForm(null)}>Cancel</button><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Save rule"}</button></div>
+        <div className="form-actions span-2"><button type="button" className="button subtle" onClick={() => setForm(null)}>Cancel</button><ResetButton disabled={saving} onClick={() => open(editing)} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Save rule"}</button></div>
       </form>
     </Modal>}
   </div>;

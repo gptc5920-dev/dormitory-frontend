@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, MonitorPlay, ScrollText, ShieldCheck, Users, X } from "lucide-react";
+import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, MonitorPlay, ScanFace, ScrollText, ShieldCheck, Users, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { CameraAlertsProvider } from "../context/CameraAlertsContext";
+import CameraNotifications, { CameraAlertToasts } from "./CameraNotifications";
 
 const links = [
   ["/", "Dashboard", Gauge], ["/tenants", "Tenants", Users],
+  ["/face-registration", "Face registration", ScanFace],
   ["/rooms", "Rooms", Building2], ["/rules", "Dormitory rules", ScrollText],
   ["/incidents", "Incidents", ClipboardList], ["/records", "Warnings & violations", BellRing],
   ["/monitoring", "Monitoring", Camera], ["/camera-wall", "Camera Wall", MonitorPlay], ["/reports", "Reports", FileBarChart],
@@ -29,6 +32,12 @@ function Navigation({ onNavigate }) {
 }
 
 export default function Layout() {
+  const { user } = useAuth();
+  const userKey = String(user.id ?? user.username);
+  return <CameraAlertsProvider key={userKey} userKey={userKey}><WorkspaceLayout /></CameraAlertsProvider>;
+}
+
+function WorkspaceLayout() {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
@@ -57,7 +66,9 @@ export default function Layout() {
         </Dialog.Root>
         <div className="breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><strong>{currentPage}</strong></div>
         <span className="workspace-role"><ShieldCheck size={15} />{user?.role === "admin" ? "Administrator" : "Manager"} workspace</span>
+        <CameraNotifications />
       </header>
+      <CameraAlertToasts />
       <main id="workspace" tabIndex={-1}><Outlet /></main>
     </div>
   </div>;

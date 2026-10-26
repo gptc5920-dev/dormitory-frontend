@@ -21,6 +21,9 @@ test.beforeEach(async ({ page }) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/monitoring/status/") return route.fulfill({ json: { mode: "Test detector", notice: "Test camera setup" } });
     if (path === "/api/rooms/") return route.fulfill({ json: [{ id: 1, number: "101" }] });
+    if (path === "/api/monitoring/detect-frame/") return route.fulfill({ json: {
+      frame: { width: 320, height: 240 }, detections: [], faces: [], incidents_created: [],
+    } });
     if (path.startsWith("/api/camera-sources/")) {
       if (path.endsWith("/snapshot/")) return route.fulfill({ json: { image: "data:image/jpeg;base64,AA==", detections: [], incidents_created: [] } });
       const method = route.request().method();
@@ -49,7 +52,7 @@ test("Wi-Fi CCTV can be saved, previewed and edited without browser permission",
   const card = page.locator(".camera-stream-card");
   await card.getByRole("button", { name: "Start stream", exact: true }).click();
   await expect(card.getByText("Live", { exact: true })).toBeVisible();
-  await card.getByRole("button", { name: "Start detection", exact: true }).click();
+  await expect(card.getByRole("button", { name: "Stop detection", exact: true })).toBeEnabled();
   await expect(card.getByText("No target cues detected")).toBeVisible();
   await card.getByRole("button", { name: "Stop stream", exact: true }).click();
   await card.getByRole("button", { name: "Configure Wi-Fi entrance" }).click();

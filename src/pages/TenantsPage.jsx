@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Camera, Edit3, Eye, Plus, Search, UserRound } from "lucide-react";
 import { api, apiList, formatDate, rows } from "../api";
-import { Empty, ErrorMessage, Loading } from "../components/Feedback";
+import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
 import TenantFaceCapture from "../components/TenantFaceCapture";
+import ResetButton from "../components/ResetButton";
 
 const blank = { first_name: "", last_name: "", email: "", phone: "", emergency_contact: "", room: "", move_in_date: "", notes: "", is_active: true };
 
-export default function TenantsPage() {
+export default function TenantsPage({ faceRegistry = false }) {
   const [items, setItems] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [search, setSearch] = useState("");
@@ -20,21 +22,28 @@ export default function TenantsPage() {
   const [faceCheck, setFaceCheck] = useState({ status: "idle", message: "" });
   const faceRequestRef = useRef(0);
   const faceCheckRef = useRef(0);
+  const loadRequestRef = useRef(0);
+  const [faceCaptureKey, setFaceCaptureKey] = useState(0);
   const [history, setHistory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [registrationFilter, setRegistrationFilter] = useState("all");
 
   const load = useCallback(async (term = search) => {
+    const request = ++loadRequestRef.current;
     setLoading(true);
+    setError("");
     try {
-      const [tenantData, roomData] = await Promise.all([apiList(`/tenants/?search=${encodeURIComponent(term)}`), apiList("/rooms/?active=true&page_size=200")]);
-      setItems(rows(tenantData)); setRooms(rows(roomData));
-    } catch (err) { setError(err.message); } finally { setLoading(false); }
-  }, [search]);
+      const [tenantData, roomData] = await Promise.all([apiList(`/tenants/?search=${encodeURIComponent(term)}`), faceRegistry ? Promise.resolve([]) : apiList("/rooms/?active=true&page_size=200")]);
+      if (request === loadRequestRef.current) { setItems(rows(tenantData)); setRooms(rows(roomData)); }
+    } catch (err) { if (request === loadRequestRef.current) setError(err.message); } finally { if (request === loadRequestRef.current) setLoading(false); }
+  }, [search, faceRegistry]);
   useEffect(() => { load(""); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function open(item = null) {
+    setFaceCaptureKey((current) => current + 1);
     const request = ++faceRequestRef.current;
     faceCheckRef.current += 1;
     setFaceTenant(null);
@@ -64,6 +73,8 @@ export default function TenantsPage() {
   }
 
   function openFace(item) {
+    setFaceCaptureKey((current) => current + 1);
+    setNotice("");
     const request = ++faceRequestRef.current;
     faceCheckRef.current += 1;
     setForm(null);
@@ -141,7 +152,7 @@ export default function TenantsPage() {
 
   async function saveFace(event) {
     event.preventDefault();
-    if (saving || !faceTenant) return;
+    if (saving || !faceTenant || (!faceFile && !faceRemoved)) return;
     if (faceFile && faceCheck.status !== "valid") { setError(faceCheck.message || "Wait for the face check to finish."); return; }
     setSaving(true);
     setError("");
@@ -153,6 +164,7 @@ export default function TenantsPage() {
       } else if (faceRemoved && faceTenant.has_face_photo) {
         await api(`/tenants/${faceTenant.id}/face-photo/`, { method: "DELETE" });
       }
+      setNotice(faceRemoved ? `Face photo removed for ${faceTenant.full_name}.` : `Face registered for ${faceTenant.full_name}.`);
       closeFace();
       await load();
     } catch (err) { setError(err.message); }
@@ -164,12 +176,18 @@ export default function TenantsPage() {
     try { setHistory(await api(`/tenants/${item.id}/history/`)); } catch (err) { setError(err.message); }
   }
 
-  return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Resident register</p><h1>Tenants</h1></div><button className="button primary" onClick={() => open()}><Plus size={17} />Enroll tenant</button></header>
-    <div className="toolbar"><form className="search-box" onSubmit={(event) => { event.preventDefault(); load(); }}><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search tenants by name, reference, or email" placeholder="Search name, reference, or email" /><button className="button subtle small">Search</button></form><span>{items.length} tenants shown</span></div>
-    <ErrorMessage message={!form ? error : ""} />
-    {loading ? <Loading /> : items.length === 0 ? <Empty title="No tenants found" detail="Adjust the search or enroll a tenant." /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Tenant</th><th>Reference</th><th>Room</th><th>Contact</th><th>Move in</th><th>Status</th><th>Face</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-      {items.map((item) => <tr key={item.id}><td><div className="person-cell"><span>{item.has_face_photo ? <Camera size={17} /> : <UserRound size={17} />}</span><strong>{item.full_name}</strong></div></td><td className="mono">{item.reference}</td><td>Room {item.room_number}</td><td>{item.email || item.phone || "-"}</td><td>{item.move_in_date ? formatDate(item.move_in_date, false) : "-"}</td><td><span className={`status ${item.is_active ? "verified" : "dismissed"}`}>{item.is_active ? "active" : "inactive"}</span></td><td>{item.has_face_photo ? "Enrolled" : "Not enrolled"}</td><td><div className="row-actions"><button className="icon-button" title={item.has_face_photo ? `Update face for ${item.full_name}` : `Enroll face for ${item.full_name}`} aria-label={item.has_face_photo ? `Update face for ${item.full_name}` : `Enroll face for ${item.full_name}`} onClick={() => openFace(item)}><Camera size={17} /></button><button className="icon-button" title="View history" onClick={() => showHistory(item)}><Eye size={17} /></button><button className="icon-button" title="Edit tenant" onClick={() => open(item)}><Edit3 size={17} /></button></div></td></tr>)}
+  const visibleItems = faceRegistry && registrationFilter !== "all"
+    ? items.filter((item) => Boolean(item.has_face_photo) === (registrationFilter === "registered"))
+    : items;
+
+  return <div className="page tenant-page">
+    <header className="page-header"><div><p className="eyebrow">{faceRegistry ? "Face recognition" : "Resident register"}</p><h1>{faceRegistry ? "Face registration" : "Tenants"}</h1></div>{faceRegistry ? <Link className="button subtle" to="/tenants"><UserRound size={17} />Manage tenants</Link> : <div className="row-actions"><Link className="button subtle" to="/face-registration"><Camera size={17} />Face registration</Link><button className="button primary" onClick={() => open()}><Plus size={17} />Enroll tenant</button></div>}</header>
+    {faceRegistry && <p className="muted">Choose a tenant and select Register face to upload a photo or use your camera. Registered faces of active tenants are used in <Link to="/monitoring">Monitoring</Link>; staff must confirm any suggested match.</p>}
+    <div className="toolbar"><form className="search-box" onSubmit={(event) => { event.preventDefault(); load(); }}><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} aria-label="Search tenants by name, reference, or email" placeholder="Search name, reference, or email" /><button className="button subtle small">Search</button></form>{faceRegistry && <select aria-label="Face registration status" value={registrationFilter} onChange={(event) => setRegistrationFilter(event.target.value)}><option value="all">All tenants</option><option value="registered">Registered</option><option value="unregistered">Not registered</option></select>}<ResetButton filters onClick={() => { setSearch(""); setRegistrationFilter("all"); setNotice(""); load(""); }} /><span>{visibleItems.length} tenants shown</span></div>
+    <ErrorMessage message={!form && !faceTenant ? error : ""} />
+    <SuccessMessage message={notice} />
+    {loading ? <Loading /> : visibleItems.length === 0 ? <Empty title="No tenants found" detail={faceRegistry ? "Adjust the filters or add a tenant from Manage tenants before registering a face." : "Adjust the search or enroll a tenant."} /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Tenant</th><th>Reference</th><th>Room</th>{!faceRegistry && <><th>Contact</th><th>Move in</th></>}<th>Status</th><th>Face</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+      {visibleItems.map((item) => <tr key={item.id}><td><div className="person-cell"><span>{item.has_face_photo ? <Camera size={17} /> : <UserRound size={17} />}</span><strong>{item.full_name}</strong></div></td><td className="mono">{item.reference}</td><td>Room {item.room_number}</td>{!faceRegistry && <><td>{item.email || item.phone || "-"}</td><td>{item.move_in_date ? formatDate(item.move_in_date, false) : "-"}</td></>}<td><span className={`status ${item.is_active ? "verified" : "dismissed"}`}>{item.is_active ? "active" : "inactive"}</span></td><td>{item.has_face_photo ? (faceRegistry ? "Registered" : "Enrolled") : (faceRegistry ? "Not registered" : "Not enrolled")}</td><td><div className="row-actions"><button className={faceRegistry ? "button subtle small" : "icon-button"} title={item.has_face_photo ? `Update face for ${item.full_name}` : `${faceRegistry ? "Register" : "Enroll"} face for ${item.full_name}`} aria-label={item.has_face_photo ? `Update face for ${item.full_name}` : `${faceRegistry ? "Register" : "Enroll"} face for ${item.full_name}`} onClick={() => openFace(item)}><Camera size={17} />{faceRegistry && (item.has_face_photo ? "Update face" : "Register face")}</button>{!faceRegistry && <><button className="icon-button" title="View history" onClick={() => showHistory(item)}><Eye size={17} /></button><button className="icon-button" title="Edit tenant" onClick={() => open(item)}><Edit3 size={17} /></button></>}</div></td></tr>)}
     </tbody></table></div></section>}
     {form && <Modal title={editing ? `Edit ${editing.full_name}` : "Enroll tenant"} onClose={closeForm} wide>
       <form className="form-grid" onSubmit={save}>
@@ -181,17 +199,17 @@ export default function TenantsPage() {
         <label>Move-in date<input type="date" value={form.move_in_date} onChange={(e) => setForm({ ...form, move_in_date: e.target.value })} /></label>
         <label className="span-2">Emergency contact<input value={form.emergency_contact} onChange={(e) => setForm({ ...form, emergency_contact: e.target.value })} /></label>
         <label className="span-2">Notes<textarea rows="3" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
-        <TenantFaceCapture file={faceFile} existingImage={faceRemoved ? "" : faceImage} hasExistingPhoto={Boolean(editing?.has_face_photo && !faceRemoved)} check={faceCheck} onChange={chooseFace} onRemove={removeFace} />
+        <TenantFaceCapture key={faceCaptureKey} file={faceFile} existingImage={faceRemoved ? "" : faceImage} hasExistingPhoto={Boolean(editing?.has_face_photo && !faceRemoved)} check={faceCheck} onChange={chooseFace} onRemove={removeFace} />
         <label className="check-field"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />Active tenant</label>
         <ErrorMessage message={error} />
-        <div className="form-actions span-2"><button className="button subtle" type="button" onClick={closeForm}>Cancel</button><button className="button primary" disabled={saving || (faceFile && faceCheck.status !== "valid")}>{saving ? "Saving..." : "Save tenant"}</button></div>
+        <div className="form-actions span-2"><button className="button subtle" type="button" onClick={closeForm}>Cancel</button><ResetButton disabled={saving} onClick={() => open(editing)} /><button className="button primary" disabled={saving || (faceFile && faceCheck.status !== "valid")}>{saving ? "Saving..." : "Save tenant"}</button></div>
       </form>
     </Modal>}
     {faceTenant && <Modal title={`${faceTenant.has_face_photo ? "Update" : "Enroll"} face: ${faceTenant.full_name}`} onClose={closeFace} wide>
       <form className="form-grid" onSubmit={saveFace}>
-        <TenantFaceCapture file={faceFile} existingImage={faceRemoved ? "" : faceImage} hasExistingPhoto={Boolean(faceTenant.has_face_photo && !faceRemoved)} check={faceCheck} onChange={chooseFace} onRemove={removeFace} />
+        <TenantFaceCapture key={faceCaptureKey} file={faceFile} existingImage={faceRemoved ? "" : faceImage} hasExistingPhoto={Boolean(faceTenant.has_face_photo && !faceRemoved)} check={faceCheck} onChange={chooseFace} onRemove={removeFace} />
         <ErrorMessage message={error} />
-        <div className="form-actions span-2"><button className="button subtle" type="button" onClick={closeFace}>Cancel</button><button className="button primary" disabled={saving || (!faceFile && !faceRemoved) || (faceFile && faceCheck.status !== "valid")}>{saving ? "Saving..." : "Save face"}</button></div>
+        <div className="form-actions span-2"><button className="button subtle" type="button" onClick={closeFace}>Cancel</button><ResetButton disabled={saving} onClick={() => openFace(faceTenant)} /><button className="button primary" disabled={saving || (!faceFile && !faceRemoved) || (faceFile && faceCheck.status !== "valid")}>{saving ? "Saving..." : "Save face"}</button></div>
       </form>
     </Modal>}
     {history && <Modal title={`${history.tenant.full_name} history`} onClose={() => setHistory(null)} wide>
