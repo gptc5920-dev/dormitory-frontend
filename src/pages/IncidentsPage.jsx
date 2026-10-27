@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Eye, Link2, Plus, Search, X } from "lucide-react";
+import { Check, Eye, Link2, Plus, Search, Trash2, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
@@ -17,6 +17,7 @@ export default function IncidentsPage() {
   const [filters, setFilters] = useState({ status: "", type: "" });
   const [modal, setModal] = useState(null);
   const [selected, setSelected] = useState(null);
+  const [deleteReturnModal, setDeleteReturnModal] = useState(null);
   const [manual, setManual] = useState({ incident_type: "manual", details: "", room: "" });
   const [assign, setAssign] = useState({ tenant: "", notes: "" });
   const [loading, setLoading] = useState(true);
@@ -24,6 +25,7 @@ export default function IncidentsPage() {
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
   const loadRequestRef = useRef(0);
+  const deletingRef = useRef(false);
 
   const load = useCallback(async () => {
     const request = ++loadRequestRef.current;
@@ -82,12 +84,50 @@ export default function IncidentsPage() {
     if (linkedIncident) setSearchParams((current) => { const next = new URLSearchParams(current); next.delete("incident"); return next; }, { replace: true });
   }
 
+  function confirmDelete(item, returnModal = null) {
+    setSelected(item);
+    setDeleteReturnModal(returnModal);
+    setModal("delete");
+    setError("");
+    setSuccess("");
+  }
+
+  function cancelDelete() {
+    if (deletingRef.current) return;
+    setError("");
+    setModal(deleteReturnModal);
+    if (!deleteReturnModal) setSelected(null);
+  }
+
+  async function deleteIncident() {
+    if (!selected || deletingRef.current) return;
+    deletingRef.current = true;
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      await api(`/incidents/${selected.id}/`, { method: "DELETE" });
+      // Ignore any earlier list response that still contains the deleted incident.
+      ++loadRequestRef.current;
+      setItems((current) => current.filter((item) => item.id !== selected.id));
+      setSuccess(`${selected.reference} deleted.`);
+      closeDetail();
+      setSelected(null);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      deletingRef.current = false;
+      setSaving(false);
+    }
+  }
+
   return <div className="page">
     <header className="page-header"><div><p className="eyebrow">Review queue</p><h1>Incidents</h1></div><button className="button primary" onClick={() => setModal("manual")}><Plus size={17} />Manual incident</button></header>
     <div className="toolbar filter-bar"><Search size={17} /><select aria-label="Incident status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="new">New</option><option value="reviewed">Reviewed</option><option value="verified">Verified</option><option value="assigned">Assigned</option><option value="dismissed">Dismissed</option></select><select aria-label="Detection type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All detection types</option>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ResetButton filters onClick={() => { setFilters({ status: "", type: "" }); setError(""); setSuccess(""); }} /><span>{items.length} incidents</span></div>
     <ErrorMessage message={!modal ? error : ""} /><SuccessMessage message={success} />
     {loading ? <Loading /> : items.length === 0 ? <Empty title="No incidents found" detail="The selected queue is clear." /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Incident</th><th>Source / room</th><th>Confidence</th><th>Occurred</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-      {items.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{typeLabels[item.incident_type]}</strong><small className="cell-detail">{item.details}</small></td><td>{item.room_number ? `Room ${item.room_number}` : item.source_display}</td><td>{item.confidence == null ? "-" : `${Math.round(item.confidence * 100)}%`}</td><td>{formatDate(item.occurred_at)}</td><td><span className={`status ${item.status}`}>{item.status}</span></td><td><button className="icon-button" title="Review incident" onClick={() => inspect(item)}><Eye size={17} /></button></td></tr>)}
+      {items.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{typeLabels[item.incident_type]}</strong><small className="cell-detail">{item.details}</small></td><td>{item.room_number ? `Room ${item.room_number}` : item.source_display}</td><td>{item.confidence == null ? "-" : `${Math.round(item.confidence * 100)}%`}</td><td>{formatDate(item.occurred_at)}</td><td><span className={`status ${item.status}`}>{item.status}</span></td><td><div className="row-actions"><button className="icon-button" title="Review incident" onClick={() => inspect(item)}><Eye size={17} /></button><button className="icon-button" title="Delete incident" aria-label={`Delete ${item.reference}`} onClick={() => confirmDelete(item)}><Trash2 size={17} /></button></div></td></tr>)}
     </tbody></table></div></section>}
 
     {modal === "manual" && <Modal title="Record manual incident" onClose={() => setModal(null)}><form className="form-grid" onSubmit={createManual}>
@@ -105,11 +145,19 @@ export default function IncidentsPage() {
       <div className="detail-notes"><strong>Incident details</strong><p>{selected.details || "No additional details."}</p>{selected.review_notes && <><strong>Review notes</strong><p>{selected.review_notes}</p></>}</div>
       <ErrorMessage message={error} />
       <div className="workflow-actions">
+        <button className="button danger-button" onClick={() => confirmDelete(selected, "detail")}><Trash2 size={17} />Delete incident</button>
         {selected.status === "new" && <button className="button subtle" onClick={() => action(selected, "review", { notes: "Reviewed in incident queue." })}><Eye size={17} />Mark reviewed</button>}
         {["new", "reviewed"].includes(selected.status) && <button className="button success-button" onClick={() => action(selected, "verify", { notes: "Manager verified evidence." })}><Check size={17} />Verify incident</button>}
         {["new", "reviewed", "verified"].includes(selected.status) && <button className="button danger-button" onClick={() => action(selected, "dismiss", { notes: "Dismissed by manager." })}><X size={17} />Dismiss</button>}
         {selected.status === "verified" && <button className="button primary" onClick={() => setModal("assign")}><Link2 size={17} />Assign tenant</button>}
       </div>
+    </Modal>}
+
+    {modal === "delete" && selected && <Modal title={`Delete ${selected.reference}?`} onClose={cancelDelete} closeDisabled={saving}>
+      <p>Permanently delete incident <strong>{selected.reference}</strong>? This cannot be undone.</p>
+      <p className="muted">Linked warnings and violations will be kept, with their incident link removed.</p>
+      <ErrorMessage message={error} />
+      <div className="form-actions"><button type="button" className="button subtle" onClick={cancelDelete} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={deleteIncident} disabled={saving}><Trash2 size={17} />{saving ? "Deleting..." : "Delete incident"}</button></div>
     </Modal>}
 
     {modal === "assign" && selected && <Modal title={`Assign ${selected.reference}`} onClose={() => setModal("detail")}><form className="form-stack" onSubmit={assignTenant}><label>Tenant<select value={assign.tenant} onChange={(e) => setAssign({ ...assign, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.reference} · {tenant.full_name} · Room {tenant.room_number}</option>)}</select></label><label>Assignment notes<textarea rows="3" value={assign.notes} onChange={(e) => setAssign({ ...assign, notes: e.target.value })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal("detail")}>Back</button><ResetButton disabled={saving} onClick={() => { setAssign({ tenant: "", notes: "" }); setError(""); setSuccess(""); }} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Assign incident"}</button></div></form></Modal>}

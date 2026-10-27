@@ -8,6 +8,7 @@ import Modal from "../components/Modal";
 import ResetButton from "../components/ResetButton";
 import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
 import { useCameraAlerts } from "../context/CameraAlertsContext";
+import { useAuth } from "../context/AuthContext";
 
 const CAMERA_BINDINGS_KEY = "dormitory_camera_device_bindings";
 const blankUpload = { file: null, room: "", source_name: "Uploaded corridor video" };
@@ -283,6 +284,8 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
 }
 
 export default function MonitoringPage() {
+  const { user } = useAuth();
+  const desktopAlerts = user?.desktop_alerts !== false;
   const controllersRef = useRef(new Map());
   const { notify: pushCameraAlert } = useCameraAlerts();
   const [setupOpen, setSetupOpen] = useState(false);
@@ -531,7 +534,7 @@ export default function MonitoringPage() {
       </Modal>}
       <section className="camera-toolbar panel">
         <div><p className="eyebrow">Live cameras</p><h2>{configuredCount} of {browserSources.length} source{browserSources.length === 1 ? "" : "s"} configured</h2><span>Detection starts automatically with each stream. Use Stop detection to pause scanning.</span></div>
-        <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button>{desktopPermission === "default" && <button className="button subtle" type="button" onClick={enableDesktopAlerts}><BellRing size={17} />Enable desktop alerts</button>}{desktopPermission === "granted" && <span className="status verified">Desktop alerts on</span>}</div>
+        <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button>{desktopAlerts && desktopPermission === "default" && <button className="button subtle" type="button" onClick={enableDesktopAlerts}><BellRing size={17} />Enable desktop alerts</button>}{desktopAlerts && desktopPermission === "granted" && <span className="status verified">Desktop alerts on</span>}{!desktopAlerts && <Link className="button subtle" to="/settings">Desktop alerts off</Link>}</div>
       </section>
       <section className="camera-stream-grid">
         {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} />)}

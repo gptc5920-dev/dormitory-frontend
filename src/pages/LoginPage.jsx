@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { ArrowRight, Eye, EyeOff, ShieldCheck } from "lucide-react";
-import { ErrorMessage } from "../components/Feedback";
+import { ErrorMessage, SuccessMessage } from "../components/Feedback";
 import { useAuth } from "../context/AuthContext";
 import ResetButton from "../components/ResetButton";
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, signInMessage } = useAuth();
   const [form, setForm] = useState({ username: "manager", password: "Manager123!" });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -33,6 +33,7 @@ export default function LoginPage() {
           <h1>Manager sign in</h1>
           <p className="muted">Review residence activity, records, and monitoring alerts.</p>
         </div>
+        <SuccessMessage message={signInMessage} />
         <form onSubmit={submit} className="form-stack">
           <label>Username<input autoFocus value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} required /></label>
           <div className="login-password-field">

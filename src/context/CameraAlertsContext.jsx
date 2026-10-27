@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { API_BASE } from "../api";
+import { useAuth } from "./AuthContext";
 
 const CameraAlertsContext = createContext(null);
 const MAX_ALERTS = 50;
@@ -15,6 +16,8 @@ function readAlerts(key) {
 }
 
 export function CameraAlertsProvider({ userKey, children }) {
+  const { user } = useAuth();
+  const desktopAlerts = user?.desktop_alerts !== false;
   const storageKey = `dormitory_camera_alerts:${encodeURIComponent(API_BASE)}:${encodeURIComponent(userKey)}`;
   const [alerts, setAlerts] = useState(() => readAlerts(storageKey));
   const alertsRef = useRef(alerts);
@@ -31,10 +34,10 @@ export function CameraAlertsProvider({ userKey, children }) {
     if (alertsRef.current.some((item) => item.tag === alert.tag && now - Date.parse(item.createdAt) < 60_000)) return;
     const entry = { ...alert, id: crypto.randomUUID(), createdAt: new Date(now).toISOString(), read: false };
     saveAlerts([entry, ...alertsRef.current].slice(0, MAX_ALERTS));
-    if (window.Notification?.permission === "granted") {
+    if (desktopAlerts && window.Notification?.permission === "granted") {
       try { new window.Notification(alert.title, { body: alert.detail, tag: alert.tag }); } catch { /* In-app warnings remain available. */ }
     }
-  }, [saveAlerts]);
+  }, [saveAlerts, desktopAlerts]);
 
   const markRead = useCallback((id) => {
     saveAlerts(alertsRef.current.map((item) => item.id === id ? { ...item, read: true } : item));

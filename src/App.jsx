@@ -11,6 +11,7 @@ import ReportsPage from "./pages/ReportsPage";
 import RoomsPage from "./pages/RoomsPage";
 import RulesPage from "./pages/RulesPage";
 import TenantsPage from "./pages/TenantsPage";
+import SettingsPage from "./pages/SettingsPage";
 
 function ProtectedLayout() {
   const { user } = useAuth();
@@ -36,6 +37,7 @@ export default function App() {
       <Route path="/monitoring" element={<MonitoringPage />} />
       <Route path="/camera-wall" element={<CameraWallPage />} />
       <Route path="/reports" element={<ReportsPage />} />
+      <Route path="/settings" element={<SettingsPage />} />
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
   </Routes>;

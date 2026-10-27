@@ -1,0 +1,21 @@
+.settings-grid { display: grid; grid-template-columns: minmax(190px, 240px) minmax(0, 760px); align-items: start; gap: 24px; }
+.settings-account { display: flex; align-items: center; flex-direction: column; gap: 8px; padding: 28px 20px; text-align: center; overflow-wrap: anywhere; }
+.settings-avatar { width: 64px; height: 64px; display: grid; place-items: center; margin-bottom: 8px; color: var(--brand-dark); background: #e2f2ec; border-radius: 50%; font-size: 1.6rem; font-weight: 700; }
+.settings-account > strong { max-width: 100%; font-size: .95rem; }
+.settings-account > .muted { max-width: 100%; font-size: .8rem; }
+.settings-account .status { margin-top: 6px; }
+.settings-account p { margin: 10px 0 0; font-size: .76rem; color: var(--muted); }
+.settings-sections { display: grid; gap: 22px; min-width: 0; }
+.settings-heading { display: flex; align-items: center; gap: 12px; }
+.settings-icon { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; color: var(--brand); background: #eaf3ee; border-radius: 10px; }
+.settings-body { padding: 22px; }
+.settings-fields { min-width: 0; margin: 0; padding: 0; border: 0; }
+.settings-fields .form-actions { margin-top: 0; }
+.settings-fields .feedback { margin: 0; }
+.settings-help { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.6; }
+.settings-toggle { flex-direction: row; align-items: flex-start; gap: 12px; cursor: pointer; }
+.settings-toggle input { margin: 3px 0 0; flex-shrink: 0; }
+.settings-toggle small { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.6; }
+.settings-permission { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 12px; background: #f6f9f7; border: 1px solid var(--line); border-radius: 8px; font-size: .76rem; }
+@media (max-width: 1100px) { .settings-grid { grid-template-columns: minmax(0, 1fr); } .settings-account { align-items: flex-start; text-align: left; } }
+@media (max-width: 600px) { .settings-body { padding: 16px; } .settings-fields.form-grid { grid-template-columns: minmax(0, 1fr); } .settings-permission .button { white-space: normal; } }
