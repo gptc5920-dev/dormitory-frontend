@@ -4,6 +4,8 @@ import { api, apiList, rows } from "../api";
 import { Empty, ErrorMessage, Loading } from "../components/Feedback";
 import Modal from "../components/Modal";
 import ResetButton from "../components/ResetButton";
+import FilterBar from "../components/FilterBar";
+import { activeOptions, matchesSearch, matchesValue, optionsFor } from "../filters";
 
 const blank = { number: "", floor: 1, capacity: 4, description: "", is_active: true };
 
@@ -14,6 +16,7 @@ export default function RoomsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState({});
 
   const load = useCallback(async () => {
     try { setItems(rows(await apiList("/rooms/"))); } catch (err) { setError(err.message); } finally { setLoading(false); }
@@ -38,15 +41,24 @@ export default function RoomsPage() {
     finally { setSaving(false); }
   }
 
+  const visibleItems = items.filter((room) => matchesSearch(filters.search, room.number, room.description)
+    && matchesValue(filters.active, room.is_active) && matchesValue(filters.floor, room.floor)
+    && (!filters.availability || (filters.availability === "available" ? room.available_beds > 0 : filters.availability === "empty" ? room.occupancy === 0 : room.available_beds === 0)));
+
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Accommodation</p><h1>Rooms</h1></div><button className="button primary" onClick={() => open()}><Plus size={17} />Add room</button></header>
+    <div className="page-actions"><button className="button primary" onClick={() => open()}><Plus size={17} />Add room</button></div>
+    <FilterBar label="Rooms" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search rooms" count={visibleItems.length} fields={[
+      { key: "active", label: "Room status", all: "All statuses", options: activeOptions },
+      { key: "floor", label: "Floor", all: "All floors", options: optionsFor(items, (item) => item.floor, (item) => `Floor ${item.floor}`) },
+      { key: "availability", label: "Availability", all: "All rooms", options: [{ value: "available", label: "Beds available" }, { value: "full", label: "Full" }, { value: "empty", label: "Empty" }] },
+    ]} />
     <ErrorMessage message={!form ? error : ""} />
-    {loading ? <Loading /> : items.length === 0 ? <Empty title="No rooms yet" detail="Add the first room to begin assigning tenants." /> :
-      <section className="room-grid">{items.map((room) => <article className="room-card" key={room.id}>
+    {loading ? <Loading /> : visibleItems.length === 0 ? <Empty title={items.length ? "No matching rooms" : "No rooms yet"} /> :
+      <section className="room-grid">{visibleItems.map((room) => <article className="room-card" key={room.id}>
         <div className="room-title"><span><BedDouble size={20} /></span><div><h2>Room {room.number}</h2><p>Floor {room.floor}</p></div><button className="icon-button" title="Edit room" onClick={() => open(room)}><Edit3 size={17} /></button></div>
         <div className="occupancy"><span style={{ width: `${Math.min(100, room.capacity ? room.occupancy / room.capacity * 100 : 0)}%` }} /></div>
         <div className="room-stats"><strong>{room.occupancy} / {room.capacity}</strong><span>{room.available_beds} beds available</span></div>
-        <p>{room.description || "No room notes"}</p>
+        {room.description && <p>{room.description}</p>}
         <span className={`status ${room.is_active ? "verified" : "dismissed"}`}>{room.is_active ? "active" : "inactive"}</span>
       </article>)}</section>}
     {form && <Modal title={editing ? `Edit room ${editing.number}` : "Add room"} onClose={() => { setEditing(null); setForm(null); setError(""); }}>

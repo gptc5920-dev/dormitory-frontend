@@ -28,14 +28,14 @@ async function setup(page, { rejectPhoto = false, tenants = null } = {}) {
   return changes;
 }
 
-test("face registration is in navigation and saves, updates, and removes tenant faces", async ({ page }) => {
+test("occupants can save, update, and remove face photos", async ({ page }) => {
   const changes = await setup(page);
   await page.goto("/tenants");
-  await page.getByRole("navigation").getByRole("link", { name: "Face registration" }).click();
-  await expect(page.getByRole("heading", { name: "Face registration", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Register face for Alex Rivera" })).toBeVisible();
+  await expect(page.getByRole("navigation").getByRole("link", { name: "Face registration" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Occupants", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enroll face for Alex Rivera" })).toBeVisible();
   await page.screenshot({ path: "test-results/face-registration-desktop.png", fullPage: true });
-  await page.getByRole("button", { name: "Register face for Alex Rivera" }).click();
+  await page.getByRole("button", { name: "Enroll face for Alex Rivera" }).click();
   const dialog = page.getByRole("dialog", { name: "Enroll face: Alex Rivera" });
   await expect(dialog.getByRole("button", { name: "Use camera" })).toBeVisible();
   await dialog.locator('input[type="file"]').setInputFiles({ name: "face.jpg", mimeType: "image/jpeg", buffer: Buffer.from("photo") });
@@ -45,24 +45,24 @@ test("face registration is in navigation and saves, updates, and removes tenant 
   await expect(page.getByRole("button", { name: "Update face for Alex Rivera" })).toBeVisible();
   expect(changes).toEqual([{ method: "POST", tenant: 1, multipart: true }]);
   await page.getByLabel("Face registration status").selectOption("unregistered");
-  await expect(page.getByText("No tenants found")).toBeVisible();
+  await expect(page.getByText("No occupants found")).toBeVisible();
   await page.getByLabel("Face registration status").selectOption("registered");
   await page.getByRole("button", { name: "Update face for Alex Rivera" }).click();
   const update = page.getByRole("dialog", { name: "Update face: Alex Rivera" });
-  await expect(update.getByAltText("Tenant enrollment face")).toBeVisible();
+  await expect(update.getByAltText("Occupant enrollment face")).toBeVisible();
   await update.getByRole("button", { name: "Remove photo" }).click();
   await update.getByRole("button", { name: "Save face" }).click();
   await expect(page.getByRole("status").filter({ hasText: "Face photo removed" })).toHaveText("Face photo removed for Alex Rivera.");
   await expect(page.getByRole("button", { name: "Update face for Alex Rivera" })).toHaveCount(0);
   await page.getByLabel("Face registration status").selectOption("unregistered");
-  await expect(page.getByRole("button", { name: "Register face for Alex Rivera" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enroll face for Alex Rivera" })).toBeVisible();
   expect(changes[1]).toMatchObject({ method: "DELETE", tenant: 1 });
 });
 
 test("invalid photos show an error and cannot be registered", async ({ page }) => {
   const changes = await setup(page, { rejectPhoto: true });
-  await page.goto("/face-registration");
-  await page.getByRole("button", { name: "Register face for Alex Rivera" }).click();
+  await page.goto("/tenants");
+  await page.getByRole("button", { name: "Enroll face for Alex Rivera" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.locator('input[type="file"]').setInputFiles({ name: "bad.jpg", mimeType: "image/jpeg", buffer: Buffer.from("photo") });
   await expect(dialog.getByRole("alert")).toContainText("exactly one visible face");
@@ -70,15 +70,15 @@ test("invalid photos show an error and cannot be registered", async ({ page }) =
   expect(changes).toEqual([]);
 });
 
-test("mobile navigation exposes the module and explains how to add the first tenant", async ({ page }) => {
+test("mobile navigation exposes occupants and explains how to add the first occupant", async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 844 });
   await setup(page, { tenants: [] });
   await page.goto("/tenants");
   await page.getByRole("button", { name: "Open navigation" }).click();
-  await page.getByRole("dialog").getByRole("link", { name: "Face registration" }).click();
-  await expect(page.getByRole("heading", { name: "Face registration", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Manage tenants" })).toBeVisible();
-  await expect(page.getByText("Adjust the filters or add a tenant from Manage tenants before registering a face.")).toBeVisible();
+  await expect(page.getByRole("dialog").getByRole("link", { name: "Face registration" })).toHaveCount(0);
+  await page.getByRole("dialog").getByRole("link", { name: "Occupants" }).click();
+  await expect(page.getByRole("heading", { name: "Occupants", exact: true })).toBeVisible();
+  await expect(page.getByText("Adjust the search or enroll an occupant.")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "test-results/face-registration-mobile.png", fullPage: true });
 });

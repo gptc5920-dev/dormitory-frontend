@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { BellRing, LockKeyhole, Save, UserRound } from "lucide-react";
 import { api } from "../api";
-import { ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
+import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import ResetButton from "../components/ResetButton";
 import { useAuth } from "../context/AuthContext";
 import "./settings.css";
+import FilterBar from "../components/FilterBar";
+import { matchesSearch, matchesValue } from "../filters";
 
 const blankPasswords = { current_password: "", new_password: "", confirm_password: "" };
 const permissionLabels = {
@@ -14,9 +16,9 @@ const permissionLabels = {
   unsupported: "Unavailable in this browser",
 };
 
-function SettingsSection({ id, title, description, icon: Icon, children }) {
-  return <section className="panel settings-section" aria-labelledby={id}>
-    <div className="panel-heading"><div className="settings-heading"><span className="settings-icon"><Icon size={20} /></span><div><h2 id={id}>{title}</h2><p>{description}</p></div></div></div>
+function SettingsSection({ id, title, icon: Icon, children, hidden }) {
+  return <section className={`panel settings-section${hidden ? " hidden" : ""}`} aria-labelledby={id}>
+    <div className="panel-heading"><div className="settings-heading"><span className="settings-icon"><Icon size={20} /></span><h2 id={id}>{title}</h2></div></div>
     <div className="settings-body">{children}</div>
   </section>;
 }
@@ -33,6 +35,7 @@ export default function SettingsPage() {
   const [feedback, setFeedback] = useState({});
   const [loadError, setLoadError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [filters, setFilters] = useState({});
 
   useEffect(() => {
     let active = true;
@@ -100,18 +103,22 @@ export default function SettingsPage() {
   }
 
   const profileChanged = account && ["first_name", "last_name", "email"].some((key) => profile[key] !== account[key]);
+  const sections = { profile: "Profile first name last name email contact", notifications: "Notifications desktop camera alerts browser permission", security: "Security current password new password confirm password" };
+  const sectionMatches = (key) => matchesValue(filters.section, key) && matchesSearch(filters.search, sections[key]);
+  const sectionCount = Object.keys(sections).filter(sectionMatches).length;
   return <div className="page settings-page">
-    <header className="page-header"><div><p className="eyebrow">Your workspace</p><h1>Settings</h1><p className="page-description">Manage your profile, notifications, and account security.</p></div></header>
-    {loadError ? <><ErrorMessage message={loadError} /><button className="button subtle" onClick={() => { setLoadError(""); setRetry((value) => value + 1); }}>Try again</button></> : !account ? <Loading label="Loading settings" /> : <div className="settings-grid">
+    {loadError ? <><ErrorMessage message={loadError} /><button className="button subtle" onClick={() => { setLoadError(""); setRetry((value) => value + 1); }}>Try again</button></> : !account ? <Loading label="Loading settings" /> : <><FilterBar label="Settings" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search settings" count={sectionCount} fields={[
+      { key: "section", label: "Settings section", all: "All sections", options: [{ value: "profile", label: "Profile" }, { value: "notifications", label: "Notifications" }, { value: "security", label: "Security" }] },
+    ]} /><div className="settings-grid">
       <aside className="panel settings-account" aria-label="Signed-in account">
         <span className="settings-avatar">{(account.first_name || account.username)[0].toUpperCase()}</span>
         <strong>{[account.first_name, account.last_name].filter(Boolean).join(" ") || account.username}</strong>
         <span className="muted">@{account.username}</span>
         <span className="status verified">{account.role === "admin" ? "Administrator" : "Manager"}</span>
-        <p>Settings apply to your signed-in account.</p>
       </aside>
       <div className="settings-sections">
-        <SettingsSection id="profile-settings" title="Profile" description="Keep your contact details up to date." icon={UserRound}>
+        {sectionCount === 0 && <Empty title="No matching settings" />}
+        <SettingsSection id="profile-settings" title="Profile" icon={UserRound} hidden={!sectionMatches("profile")}>
           <form onSubmit={(event) => saveAccount(event, "profile", profile)}>
             <fieldset disabled={!!busy} className="settings-fields form-grid">
               <label>First name<input autoComplete="given-name" maxLength={150} value={profile.first_name} onChange={(e) => { setProfile({ ...profile, first_name: e.target.value }); clearFeedback("profile"); }} /></label>
@@ -122,33 +129,33 @@ export default function SettingsPage() {
             </fieldset>
           </form>
         </SettingsSection>
-        <SettingsSection id="notification-settings" title="Notifications" description="Choose whether camera alerts appear on your desktop." icon={BellRing}>
+        <SettingsSection id="notification-settings" title="Notifications" icon={BellRing} hidden={!sectionMatches("notifications")}>
           <form onSubmit={(event) => saveAccount(event, "notifications", { desktop_alerts: desktopAlerts })}>
             <fieldset disabled={!!busy} className="settings-fields form-stack">
-              <label className="settings-toggle"><input type="checkbox" checked={desktopAlerts} onChange={(e) => { setDesktopAlerts(e.target.checked); clearFeedback("notifications"); }} /><span>Desktop camera alerts<small>Send desktop notifications for new camera activity and possible unauthorized people.</small></span></label>
+              <label className="settings-toggle"><input type="checkbox" checked={desktopAlerts} onChange={(e) => { setDesktopAlerts(e.target.checked); clearFeedback("notifications"); }} /><span>Desktop camera alerts</span></label>
               <div className="settings-permission"><span>{permissionLabels[permission]}</span>{permission === "default" && <button type="button" className="button subtle small" disabled={requestingPermission} onClick={requestPermission}>{requestingPermission ? "Requesting..." : "Allow browser notifications"}</button>}</div>
               {permission === "denied" && <p className="settings-help">Allow notifications in your browser's site settings to receive desktop alerts.</p>}
               {permission === "unsupported" && <p className="settings-help">This browser cannot send desktop notifications. Try a supported browser over HTTPS or localhost.</p>}
-              <p className="settings-help">Desktop alerts need browser permission and an open monitoring page with detection running. Alerts always remain available in the notification bell.</p>
+              <p className="settings-help">Requires browser permission and active monitoring. In-app alerts remain enabled.</p>
               <ErrorMessage message={feedback.notifications?.error} /><SuccessMessage message={feedback.notifications?.success} />
               <div className="form-actions"><ResetButton disabled={desktopAlerts === account.desktop_alerts || !!busy} onClick={() => { setDesktopAlerts(account.desktop_alerts); clearFeedback("notifications"); }} /><button className="button primary" disabled={desktopAlerts === account.desktop_alerts || !!busy}><Save size={16} />{busy === "notifications" ? "Saving..." : "Save notifications"}</button></div>
             </fieldset>
           </form>
         </SettingsSection>
-        <SettingsSection id="security-settings" title="Security" description="Update the password you use to sign in." icon={LockKeyhole}>
+        <SettingsSection id="security-settings" title="Security" icon={LockKeyhole} hidden={!sectionMatches("security")}>
           <form onSubmit={savePassword}>
             <fieldset disabled={!!busy} className="settings-fields form-grid">
               <input className="sr-only" aria-label="Account username" autoComplete="username" value={account.username} readOnly tabIndex={-1} />
               <label className="span-2">Current password<input type="password" autoComplete="current-password" maxLength={128} required value={passwords.current_password} onChange={(e) => { setPasswords({ ...passwords, current_password: e.target.value }); clearFeedback("security"); }} /></label>
               <label>New password<input type="password" autoComplete="new-password" minLength={8} maxLength={128} required value={passwords.new_password} onChange={(e) => { setPasswords({ ...passwords, new_password: e.target.value }); clearFeedback("security"); }} /></label>
               <label>Confirm new password<input type="password" autoComplete="new-password" minLength={8} maxLength={128} required value={passwords.confirm_password} onChange={(e) => { setPasswords({ ...passwords, confirm_password: e.target.value }); clearFeedback("security"); }} /></label>
-              <p className="settings-help span-2">Use at least 8 characters. Avoid common passwords, numbers only, and personal details. Changing your password signs you out on all devices.</p>
+              <p className="settings-help span-2">Use at least 8 characters. Changing your password signs you out on all devices.</p>
               <div className="span-2"><ErrorMessage message={feedback.security?.error} /></div>
               <div className="form-actions span-2"><ResetButton disabled={!!busy} onClick={() => { setPasswords(blankPasswords); clearFeedback("security"); }} /><button className="button primary" disabled={!!busy}>{busy === "security" ? "Updating..." : "Change password"}</button></div>
             </fieldset>
           </form>
         </SettingsSection>
       </div>
-    </div>}
+    </div></>}
   </div>;
 }

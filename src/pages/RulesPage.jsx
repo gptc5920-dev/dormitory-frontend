@@ -4,6 +4,8 @@ import { api, apiList, rows } from "../api";
 import { Empty, ErrorMessage, Loading } from "../components/Feedback";
 import Modal from "../components/Modal";
 import ResetButton from "../components/ResetButton";
+import FilterBar from "../components/FilterBar";
+import { activeOptions, matchesSearch, matchesValue, optionsFor } from "../filters";
 
 const blank = { code: "", title: "", category: "Conduct", description: "", severity: "medium", is_active: true };
 
@@ -14,6 +16,7 @@ export default function RulesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState({});
   const load = useCallback(async () => { try { setItems(rows(await apiList("/rules/"))); } catch (err) { setError(err.message); } finally { setLoading(false); } }, []);
   useEffect(() => { load(); }, [load]);
   function open(item = null) { setEditing(item); setForm(item ? { code: item.code, title: item.title, category: item.category, description: item.description, severity: item.severity, is_active: item.is_active } : blank); setError(""); }
@@ -26,11 +29,18 @@ export default function RulesPage() {
     catch (err) { setError(err.message); }
     finally { setSaving(false); }
   }
+  const visibleItems = items.filter((item) => matchesSearch(filters.search, item.code, item.title, item.description)
+    && matchesValue(filters.active, item.is_active) && matchesValue(filters.category, item.category) && matchesValue(filters.severity, item.severity));
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Policy register</p><h1>Dormitory rules</h1></div><button className="button primary" onClick={() => open()}><Plus size={17} />Add rule</button></header>
+    <div className="page-actions"><button className="button primary" onClick={() => open()}><Plus size={17} />Add rule</button></div>
+    <FilterBar label="Rules" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search rules" count={visibleItems.length} fields={[
+      { key: "active", label: "Rule status", all: "All statuses", options: activeOptions },
+      { key: "category", label: "Category", all: "All categories", options: optionsFor(items, (item) => item.category) },
+      { key: "severity", label: "Rule severity", all: "All severities", options: ["low", "medium", "high", "critical"].map((value) => ({ value, label: value[0].toUpperCase() + value.slice(1) })) },
+    ]} />
     <ErrorMessage message={!form ? error : ""} />
-    {loading ? <Loading /> : items.length === 0 ? <Empty title="No rules configured" /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Code</th><th>Rule</th><th>Category</th><th>Severity</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-      {items.map((item) => <tr key={item.id}><td className="mono">{item.code}</td><td><strong>{item.title}</strong><small className="cell-detail">{item.description}</small></td><td>{item.category}</td><td><span className={`severity ${item.severity}`}>{item.severity}</span></td><td><span className={`status ${item.is_active ? "verified" : "dismissed"}`}>{item.is_active ? "active" : "inactive"}</span></td><td><button className="icon-button" title="Edit rule" onClick={() => open(item)}><Edit3 size={17} /></button></td></tr>)}
+    {loading ? <Loading /> : visibleItems.length === 0 ? <Empty title={items.length ? "No matching rules" : "No rules configured"} /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Code</th><th>Rule</th><th>Category</th><th>Severity</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+      {visibleItems.map((item) => <tr key={item.id}><td className="mono">{item.code}</td><td><strong>{item.title}</strong><small className="cell-detail">{item.description}</small></td><td>{item.category}</td><td><span className={`severity ${item.severity}`}>{item.severity}</span></td><td><span className={`status ${item.is_active ? "verified" : "dismissed"}`}>{item.is_active ? "active" : "inactive"}</span></td><td><button className="icon-button" title="Edit rule" onClick={() => open(item)}><Edit3 size={17} /></button></td></tr>)}
     </tbody></table></div></section>}
     {form && <Modal title={editing ? `Edit ${editing.code}` : "Add dormitory rule"} onClose={() => { setForm(null); setEditing(null); }}>
       <form className="form-grid" onSubmit={save}>

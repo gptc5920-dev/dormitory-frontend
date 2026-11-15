@@ -3,7 +3,7 @@ import { api } from "../api";
 import { CircleStop, Play, ScanLine, Settings2, Wifi } from "lucide-react";
 import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
 
-export default function NetworkCameraStream({ source, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus }) {
+export default function NetworkCameraStream({ source, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus, hidden }) {
   const session = useRef(0);
   const timer = useRef(null);
   const active = useRef(false);
@@ -71,7 +71,7 @@ export default function NetworkCameraStream({ source, onConfigure, registerContr
     return () => { registerController(source.id, null); stopCamera(); };
   }, [source, registerController, startCamera, stopCamera]);
 
-  return <article className="camera-stream-card">
+  return <article className={`camera-stream-card${hidden ? " hidden" : ""}`}>
     <header className="camera-stream-heading">
       <div><h2>{source.name}</h2><span>{source.location} · Wi-Fi / IP CCTV</span></div>
       <div className="camera-card-actions"><span className="status">{state}</span><button className="button subtle" onClick={() => onConfigure(source)} aria-label={`Configure ${source.name}`}><Settings2 size={17} aria-hidden="true" />Configure</button></div>

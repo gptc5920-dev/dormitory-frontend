@@ -4,6 +4,8 @@ import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
 import ResetButton from "../components/ResetButton";
+import FilterBar from "../components/FilterBar";
+import { inDateRange, matchesSearch, matchesValue, optionsFor } from "../filters";
 
 const blankWarning = { tenant: "", rule: "", incident: "", message: "" };
 const blankViolation = { tenant: "", rule: "", incident: "", description: "", action_taken: "", evidence: null };
@@ -23,6 +25,7 @@ export default function RecordsPage() {
   const [success, setSuccess] = useState("");
   const [saving, setSaving] = useState(false);
   const evidenceRef = useRef(null);
+  const [filters, setFilters] = useState({});
 
   function resetForm() {
     if (modal === "warning") setWarningForm({ ...blankWarning });
@@ -74,26 +77,39 @@ export default function RecordsPage() {
     } catch (err) { setError(err.message); } finally { setSaving(false); }
   }
 
+  const matchesRecord = (item) => matchesSearch(filters.search, item.reference, item.tenant_name, item.tenant_reference, item.rule_code, item.rule_title, item.incident_reference, item.message, item.description, item.action_taken)
+    && matchesValue(filters.tenant, item.tenant) && matchesValue(filters.rule, item.rule)
+    && inDateRange(item.issued_at || item.recorded_at, filters.date_from, filters.date_to);
+  const visibleWarnings = warnings.filter((item) => matchesRecord(item) && matchesValue(filters.acknowledged, item.acknowledged));
+  const visibleViolations = violations.filter((item) => matchesRecord(item) && matchesValue(filters.evidence, Boolean(item.evidence)));
+  const recordOptions = [...warnings, ...violations];
+
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Disciplinary register</p><h1>Warnings & violations</h1></div><button className="button primary" onClick={() => setModal(tab === "warnings" ? "warning" : "violation")}><Plus size={17} />{tab === "warnings" ? "Issue warning" : "Record violation"}</button></header>
-    <div className="segmented"><button className={tab === "warnings" ? "active" : ""} onClick={() => setTab("warnings")}><BellRing size={17} />Warnings <span>{warnings.length}</span></button><button className={tab === "violations" ? "active" : ""} onClick={() => setTab("violations")}><AlertOctagon size={17} />Violations <span>{violations.length}</span></button></div>
+    <div className="page-actions"><button className="button primary" onClick={() => setModal(tab === "warnings" ? "warning" : "violation")}><Plus size={17} />{tab === "warnings" ? "Issue warning" : "Record violation"}</button></div>
+    <div className="segmented"><button className={tab === "warnings" ? "active" : ""} onClick={() => setTab("warnings")}><BellRing size={17} />Warnings <span>{visibleWarnings.length}</span></button><button className={tab === "violations" ? "active" : ""} onClick={() => setTab("violations")}><AlertOctagon size={17} />Violations <span>{visibleViolations.length}</span></button></div>
+    <FilterBar label="Records" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search records" count={tab === "warnings" ? visibleWarnings.length : visibleViolations.length} fields={[
+      { key: "tenant", label: "Record occupant", all: "All occupants", options: optionsFor(recordOptions, (item) => item.tenant, (item) => `${item.tenant_reference || ""} ${item.tenant_name}`.trim()) },
+      { key: "rule", label: "Record rule", all: "All rules", options: optionsFor(recordOptions, (item) => item.rule, (item) => `${item.rule_code} ${item.rule_title}`) },
+      ...(tab === "warnings" ? [{ key: "acknowledged", label: "Warning status", all: "All statuses", options: [{ value: "true", label: "Acknowledged" }, { value: "false", label: "Issued" }] }] : [{ key: "evidence", label: "Evidence", all: "All records", options: [{ value: "true", label: "With evidence" }, { value: "false", label: "Without evidence" }] }]),
+      { key: "date_from", label: "Record from date", type: "date" }, { key: "date_to", label: "Record to date", type: "date" },
+    ]} />
     <ErrorMessage message={!modal ? error : ""} /><SuccessMessage message={success} />
-    {loading ? <Loading /> : tab === "warnings" ? (warnings.length === 0 ? <Empty title="No warnings issued" /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Tenant</th><th>Rule</th><th>Message</th><th>Issued</th><th>Status</th></tr></thead><tbody>
-      {warnings.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{item.tenant_name}</strong><small className="cell-detail">{item.tenant_reference}</small></td><td><span className="mono">{item.rule_code}</span><small className="cell-detail">{item.rule_title}</small></td><td>{item.message}</td><td>{formatDate(item.issued_at)}</td><td><span className={`status ${item.acknowledged ? "verified" : "reviewed"}`}>{item.acknowledged ? "acknowledged" : "issued"}</span></td></tr>)}
-    </tbody></table></div></section>) : (violations.length === 0 ? <Empty title="No violations recorded" /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Tenant</th><th>Rule</th><th>Description</th><th>Action</th><th>Evidence</th><th>Recorded</th></tr></thead><tbody>
-      {violations.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{item.tenant_name}</strong><small className="cell-detail">{item.tenant_reference}</small></td><td><span className="mono">{item.rule_code}</span><small className="cell-detail">{item.rule_title}</small></td><td>{item.description}</td><td>{item.action_taken || "-"}</td><td>{item.evidence ? <a className="evidence-link" href={assetUrl(item.evidence)} target="_blank" rel="noreferrer"><FilePlus2 size={16} />View</a> : "-"}</td><td>{formatDate(item.recorded_at)}</td></tr>)}
+    {loading ? <Loading /> : tab === "warnings" ? (visibleWarnings.length === 0 ? <Empty title="No warnings found" /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Occupant</th><th>Rule</th><th>Message</th><th>Issued</th><th>Status</th></tr></thead><tbody>
+      {visibleWarnings.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{item.tenant_name}</strong><small className="cell-detail">{item.tenant_reference}</small></td><td><span className="mono">{item.rule_code}</span><small className="cell-detail">{item.rule_title}</small></td><td>{item.message}</td><td>{formatDate(item.issued_at)}</td><td><span className={`status ${item.acknowledged ? "verified" : "reviewed"}`}>{item.acknowledged ? "acknowledged" : "issued"}</span></td></tr>)}
+    </tbody></table></div></section>) : (visibleViolations.length === 0 ? <Empty title="No violations found" /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Occupant</th><th>Rule</th><th>Description</th><th>Action</th><th>Evidence</th><th>Recorded</th></tr></thead><tbody>
+      {visibleViolations.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{item.tenant_name}</strong><small className="cell-detail">{item.tenant_reference}</small></td><td><span className="mono">{item.rule_code}</span><small className="cell-detail">{item.rule_title}</small></td><td>{item.description}</td><td>{item.action_taken || "-"}</td><td>{item.evidence ? <a className="evidence-link" href={assetUrl(item.evidence)} target="_blank" rel="noreferrer"><FilePlus2 size={16} />View</a> : "-"}</td><td>{formatDate(item.recorded_at)}</td></tr>)}
     </tbody></table></div></section>)}
 
     {modal === "warning" && <Modal title="Issue warning" onClose={() => setModal(null)}><form className="form-stack" onSubmit={createWarning}>
       <label>Verified incident (optional)<select value={warningForm.incident} onChange={(e) => chooseIncident(warningForm, setWarningForm, e.target.value)}><option value="">No linked incident</option>{incidents.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.assigned_tenant_name}</option>)}</select></label>
-      <label>Tenant<select value={warningForm.tenant} onChange={(e) => setWarningForm({ ...warningForm, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.full_name}</option>)}</select></label>
+      <label>Occupant<select value={warningForm.tenant} onChange={(e) => setWarningForm({ ...warningForm, tenant: e.target.value })} required><option value="">Select occupant</option>{tenants.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.full_name}</option>)}</select></label>
       <label>Dormitory rule<select value={warningForm.rule} onChange={(e) => setWarningForm({ ...warningForm, rule: e.target.value })} required><option value="">Select rule</option>{rules.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title}</option>)}</select></label>
       <label>Warning message<textarea rows="4" value={warningForm.message} onChange={(e) => setWarningForm({ ...warningForm, message: e.target.value })} required /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal(null)}>Cancel</button><ResetButton disabled={saving} onClick={resetForm} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Issue warning"}</button></div>
     </form></Modal>}
 
     {modal === "violation" && <Modal title="Record violation" onClose={() => setModal(null)}><form className="form-stack" onSubmit={createViolation}>
       <label>Verified incident (optional)<select value={violationForm.incident} onChange={(e) => chooseIncident(violationForm, setViolationForm, e.target.value)}><option value="">No linked incident</option>{incidents.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.assigned_tenant_name}</option>)}</select></label>
-      <label>Tenant<select value={violationForm.tenant} onChange={(e) => setViolationForm({ ...violationForm, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.full_name}</option>)}</select></label>
+      <label>Occupant<select value={violationForm.tenant} onChange={(e) => setViolationForm({ ...violationForm, tenant: e.target.value })} required><option value="">Select occupant</option>{tenants.map((item) => <option key={item.id} value={item.id}>{item.reference} · {item.full_name}</option>)}</select></label>
       <label>Dormitory rule<select value={violationForm.rule} onChange={(e) => setViolationForm({ ...violationForm, rule: e.target.value })} required><option value="">Select rule</option>{rules.map((item) => <option key={item.id} value={item.id}>{item.code} · {item.title}</option>)}</select></label>
       <label>Description<textarea rows="4" value={violationForm.description} onChange={(e) => setViolationForm({ ...violationForm, description: e.target.value })} required /></label>
       <label>Action taken<input value={violationForm.action_taken} onChange={(e) => setViolationForm({ ...violationForm, action_taken: e.target.value })} /></label>

@@ -13,23 +13,37 @@ async function cameraPhoto(video) {
   return blob ? new File([blob], "tenant-face.jpg", { type: "image/jpeg" }) : null;
 }
 
-export default function TenantFaceCapture({ file, existingImage, hasExistingPhoto, check, onChange, onRemove }) {
+function FacePhoto({ photo, index, disabled, onRemove }) {
+  const [preview, setPreview] = useState("");
+  useEffect(() => {
+    if (!photo.file) return undefined;
+    const url = URL.createObjectURL(photo.file);
+    setPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [photo.file]);
+  return <div className="tenant-face-sample">
+    <div className="tenant-face-preview"><img src={photo.image || preview || undefined} alt={index === 0 ? "Occupant enrollment face" : `Occupant enrollment face ${index + 1}`} /></div>
+    <span className="muted">Photo {index + 1}{!photo.file ? " · Saved" : ""}</span>
+    {photo.message && <p role={photo.status === "error" ? "alert" : "status"} className={photo.status === "error" ? "camera-error" : "muted"}>{photo.message}</p>}
+    <button type="button" className="button subtle small" disabled={disabled} aria-label={index === 0 ? "Remove photo" : `Remove photo ${index + 1}`} onClick={() => onRemove(photo.key)}><Trash2 size={14} />Remove</button>
+  </div>;
+}
+
+export default function TenantFaceCapture({ photos, disabled, onChange, onRemove }) {
   const videoRef = useRef(null);
   const uploadRef = useRef(null);
   const streamRef = useRef(null);
   const cameraSessionRef = useRef(0);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const captureBusyRef = useRef(null);
+  const automaticDoneRef = useRef(false);
+  const canCaptureRef = useRef(false);
+  canCaptureRef.current = !disabled && photos.length < 10;
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [preview, setPreview] = useState("");
+  const [capturing, setCapturing] = useState(false);
+  const [autoCaptured, setAutoCaptured] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!file) { setPreview(""); return undefined; }
-    const url = URL.createObjectURL(file);
-    setPreview(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
 
   useEffect(() => () => {
     cameraSessionRef.current += 1;
@@ -51,6 +65,10 @@ export default function TenantFaceCapture({ file, existingImage, hasExistingPhot
     const session = cameraSessionRef.current;
     const isCurrent = () => active && session === cameraSessionRef.current;
     async function detectFace() {
+      if (!isCurrent() || !canCaptureRef.current || automaticDoneRef.current) return;
+      if (captureBusyRef.current === session) { timer = setTimeout(detectFace, 1500); return; }
+      captureBusyRef.current = session;
+      setCapturing(true);
       try {
         const photo = await cameraPhoto(videoRef.current);
         if (!isCurrent()) return;
@@ -60,8 +78,9 @@ export default function TenantFaceCapture({ file, existingImage, hasExistingPhot
           const result = await api("/tenants/check-face/", { method: "POST", body });
           if (!isCurrent()) return;
           if (result?.face_detected) {
-            onChangeRef.current(photo);
-            stopCamera();
+            if (canCaptureRef.current && !automaticDoneRef.current) onChangeRef.current([photo]);
+            automaticDoneRef.current = true;
+            setAutoCaptured(true);
             return;
           }
         }
@@ -73,6 +92,9 @@ export default function TenantFaceCapture({ file, existingImage, hasExistingPhot
           stopCamera();
           return;
         }
+      } finally {
+        if (captureBusyRef.current === session) captureBusyRef.current = null;
+        if (isCurrent()) setCapturing(false);
       }
       if (isCurrent()) timer = setTimeout(detectFace, 1500);
     }
@@ -82,6 +104,9 @@ export default function TenantFaceCapture({ file, existingImage, hasExistingPhot
 
   async function startCamera() {
     setError("");
+    setAutoCaptured(false);
+    automaticDoneRef.current = false;
+    setCapturing(false);
     const session = ++cameraSessionRef.current;
     try {
       if (!navigator.mediaDevices?.getUserMedia) throw new Error("Camera capture requires HTTPS and a supported browser.");
@@ -101,32 +126,43 @@ export default function TenantFaceCapture({ file, existingImage, hasExistingPhot
 
   async function capture() {
     const session = cameraSessionRef.current;
-    const photo = await cameraPhoto(videoRef.current);
-    if (session !== cameraSessionRef.current) return;
-    if (!photo) { setError("Unable to capture a photo. Try again."); return; }
-    onChange(photo);
-    stopCamera();
+    if (captureBusyRef.current === session || !canCaptureRef.current) return;
+    captureBusyRef.current = session;
+    setCapturing(true);
+    try {
+      const photo = await cameraPhoto(videoRef.current);
+      if (session !== cameraSessionRef.current) return;
+      if (!photo) { setError("Unable to capture a photo. Try again."); return; }
+      if (canCaptureRef.current) onChangeRef.current([photo]);
+      automaticDoneRef.current = true;
+      setAutoCaptured(true);
+      setError("");
+    } catch (err) { setError(`Unable to capture a photo: ${err.message}`); }
+    finally {
+      if (captureBusyRef.current === session) captureBusyRef.current = null;
+      if (session === cameraSessionRef.current) setCapturing(false);
+    }
   }
 
-  const image = preview || existingImage;
   return <div className="tenant-face-field span-2">
-    <strong>Face photo</strong>
-    <p className="muted">Add one clear, front-facing photo. Camera matches are suggestions for staff review.</p>
+    <strong>Face photos · {photos.length}/10</strong>
+    <p className="muted">Add 3–5 clear photos of the same person: front, slight left, slight right, and at the camera’s usual distance. Keep one visible face in every photo. Up to 10 photos, 8 MB each.</p>
+    <p className="muted">More angles can help matching, but a distant or blurry face may still be unrecognizable. Camera matches are suggestions for staff review.</p>
+    <div className="tenant-face-gallery">
+      {photos.length ? photos.map((photo, index) => <FacePhoto key={photo.key} photo={photo} index={index} disabled={disabled} onRemove={onRemove} />) : <span className="muted">{disabled ? "Loading face photos..." : "No photos yet"}</span>}
+    </div>
     <div className="tenant-face-content">
-      <div className="tenant-face-preview">{image ? <img src={image} alt="Tenant enrollment face" /> : <span>{hasExistingPhoto ? "Photo enrolled" : "No photo yet"}</span>}</div>
       <div className="tenant-face-actions">
-        <input ref={uploadRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => { const selected = event.target.files?.[0]; if (selected) { stopCamera(); onChange(selected); setError(""); } event.target.value = ""; }} />
-        <button type="button" className="button subtle" onClick={() => uploadRef.current?.click()}><ImagePlus size={16} />Upload photo</button>
-        {!cameraOpen ? <button type="button" className="button subtle" onClick={startCamera}><Camera size={16} />Use camera</button> : <>
-          <button type="button" className="button primary" onClick={capture}><Camera size={16} />Capture photo</button>
+        <input ref={uploadRef} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={disabled || photos.length >= 10} hidden onChange={(event) => { const selected = Array.from(event.target.files || []); if (selected.length) { stopCamera(); onChange(selected); setError(""); } event.target.value = ""; }} />
+        <button type="button" className="button subtle" disabled={disabled || photos.length >= 10} onClick={() => uploadRef.current?.click()}><ImagePlus size={16} />Upload photos</button>
+        {!cameraOpen ? <button type="button" className="button subtle" disabled={disabled || photos.length >= 10} onClick={startCamera}><Camera size={16} />Use camera</button> : <>
+          <button type="button" className="button primary" disabled={disabled || capturing || photos.length >= 10} onClick={capture}><Camera size={16} />Capture photo</button>
           <button type="button" className="button subtle" onClick={stopCamera}><CircleStop size={16} />Stop camera</button>
         </>}
-        {(file || hasExistingPhoto) && <button type="button" className="button subtle" onClick={() => { stopCamera(); onRemove(); setError(""); }}><Trash2 size={16} />Remove photo</button>}
       </div>
     </div>
     <video ref={videoRef} className={`tenant-face-camera ${cameraOpen ? "" : "hidden"}`} playsInline muted />
-    {cameraOpen && <p role="status" className="muted">Looking for one clear face. Hold still; a photo will be captured automatically. You can also select Capture photo.</p>}
-    {file && check?.message && <p role={check.status === "error" ? "alert" : "status"} className={check.status === "error" ? "camera-error" : "muted"}>{check.message}</p>}
+    {cameraOpen && <p role="status" className="muted">{autoCaptured ? "First photo captured. Turn slightly left or right, then select Capture photo for each new angle. Select Save when finished." : "Looking for one clear face. Hold still; the first photo will be captured automatically. You can also select Capture photo."}</p>}
     {error && <p role="alert" className="camera-error">{error}</p>}
   </div>;
 }

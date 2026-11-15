@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, MonitorPlay, ScanFace, ScrollText, Settings, ShieldCheck, Users, X } from "lucide-react";
+import { BellRing, Building2, Camera, ClipboardList, FileBarChart, Gauge, LogOut, Menu, MonitorPlay, ScrollText, Settings, Users, X } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { CameraAlertsProvider } from "../context/CameraAlertsContext";
 import CameraNotifications, { CameraAlertToasts } from "./CameraNotifications";
 
 const links = [
-  ["/", "Dashboard", Gauge], ["/tenants", "Tenants", Users],
-  ["/face-registration", "Face registration", ScanFace],
+  ["/", "Dashboard", Gauge], ["/tenants", "Occupants", Users],
   ["/rooms", "Rooms", Building2], ["/rules", "Dormitory rules", ScrollText],
   ["/incidents", "Incidents", ClipboardList], ["/records", "Warnings & violations", BellRing],
   ["/monitoring", "Monitoring", Camera], ["/camera-wall", "Camera Wall", MonitorPlay], ["/reports", "Reports", FileBarChart],
@@ -18,12 +17,10 @@ const links = [
 function Navigation({ onNavigate }) {
   const { user, logout } = useAuth();
   return <>
-    <div className="brand"><span className="brand-mark"><Building2 size={22} /></span><span>Smart Dormitory<small>RESIDENCE MANAGEMENT</small></span></div>
-    <p className="nav-caption">Workspace</p>
+    <div className="brand"><span className="brand-mark"><Building2 size={22} /></span><span>Smart Dormitory</span></div>
     <nav aria-label="Main navigation">{links.map(([to, label, Icon]) =>
       <NavLink key={to} to={to} end={to === "/"} onClick={onNavigate}><Icon size={18} /><span>{label}</span></NavLink>
     )}</nav>
-    <div className="sidebar-note"><ShieldCheck size={22} /><strong>A better place to live.</strong><p>Your people, spaces, and daily operations in one place.</p></div>
     <div className="sidebar-user">
       <div className="avatar">{(user?.first_name || user?.username || "M")[0].toUpperCase()}</div>
       <div><strong>{user?.first_name || user?.username}</strong><span>{user?.role}</span></div>
@@ -39,7 +36,6 @@ export default function Layout() {
 }
 
 function WorkspaceLayout() {
-  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const { pathname } = useLocation();
   const currentPage = links.find(([path]) => path === pathname)?.[1] || "Dashboard";
@@ -65,8 +61,7 @@ function WorkspaceLayout() {
             </Dialog.Content>
           </Dialog.Portal>
         </Dialog.Root>
-        <div className="breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><strong>{currentPage}</strong></div>
-        <span className="workspace-role"><ShieldCheck size={15} />{user?.role === "admin" ? "Administrator" : "Manager"} workspace</span>
+        <div className="breadcrumb"><span>Workspace</span><span aria-hidden="true">/</span><h1>{currentPage}</h1></div>
         <CameraNotifications />
       </header>
       <CameraAlertToasts />

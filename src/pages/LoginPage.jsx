@@ -29,9 +29,7 @@ export default function LoginPage() {
       <section className="login-panel">
         <div className="login-brand"><span className="brand-mark"><ShieldCheck size={23} /></span>Smart Dormitory</div>
         <div>
-          <p className="eyebrow">Staff access</p>
           <h1>Manager sign in</h1>
-          <p className="muted">Review residence activity, records, and monitoring alerts.</p>
         </div>
         <SuccessMessage message={signInMessage} />
         <form onSubmit={submit} className="form-stack">

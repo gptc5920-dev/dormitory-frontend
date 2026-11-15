@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { Buffer } from "node:buffer";
 
-test("enrolling a tenant uploads the selected face photo", async ({ page }) => {
+test("enrolling a tenant uploads all selected face angles", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("dormitory_user", JSON.stringify({ username: "manager", role: "manager" })));
   let tenant = null;
   let facePosted = false;
@@ -14,7 +14,7 @@ test("enrolling a tenant uploads the selected face photo", async ({ page }) => {
       return route.fulfill({ status: 201, json: tenant });
     }
     if (path === "/api/tenants/7/face-photo/" && route.request().method() === "POST") {
-      facePosted = route.request().headers()["content-type"].includes("multipart/form-data") && route.request().postData().includes("face.png");
+      facePosted = route.request().headers()["content-type"].includes("multipart/form-data") && ["face.png", "left.png", "right.png"].every((name) => route.request().postData().includes(name));
       tenant.has_face_photo = true;
       return route.fulfill({ json: { has_face_photo: true } });
     }
@@ -23,16 +23,16 @@ test("enrolling a tenant uploads the selected face photo", async ({ page }) => {
   });
 
   await page.goto("/tenants");
-  await page.getByRole("button", { name: "Enroll tenant" }).click();
-  const dialog = page.getByRole("dialog", { name: "Enroll tenant" });
+  await page.getByRole("button", { name: "Enroll occupant" }).click();
+  const dialog = page.getByRole("dialog", { name: "Enroll occupant" });
   await dialog.getByLabel("First name").fill("Alex");
   await dialog.getByLabel("Last name").fill("Rivera");
   await dialog.getByLabel("Room").selectOption("1");
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9d4JcAAAAASUVORK5CYII=", "base64");
-  await dialog.locator('input[type="file"]').setInputFiles({ name: "face.png", mimeType: "image/png", buffer: png });
-  await expect(dialog.getByAltText("Tenant enrollment face")).toBeVisible();
-  await expect(dialog.getByText("One face detected. Ready to enroll.")).toBeVisible();
-  await dialog.getByRole("button", { name: "Save tenant" }).click();
+  await dialog.locator('input[type="file"]').setInputFiles(["face.png", "left.png", "right.png"].map((name) => ({ name, mimeType: "image/png", buffer: png })));
+  await expect(dialog.getByAltText("Occupant enrollment face", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("One face detected. Ready to enroll.")).toHaveCount(3);
+  await dialog.getByRole("button", { name: "Save occupant" }).click();
   await expect(dialog).toHaveCount(0);
   expect(facePosted).toBe(true);
   await expect(page.getByText("Alex Rivera")).toBeVisible();

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Eye, Link2, Plus, Search, Trash2, X } from "lucide-react";
+import { Check, Eye, Link2, Plus, Trash2, X } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { api, apiList, assetUrl, formatDate, rows } from "../api";
 import { Empty, ErrorMessage, Loading, SuccessMessage } from "../components/Feedback";
 import Modal from "../components/Modal";
 import ResetButton from "../components/ResetButton";
+import FilterBar from "../components/FilterBar";
+import { incidentTypes as typeLabels, incidentStatuses, incidentTypeOptions, inDateRange, matchesSearch, matchesValue, optionsFor } from "../filters";
 
-const typeLabels = { person: "Person detected", bottle: "Bottle detected", possible_drinking: "Possible drinking gesture", possible_smoke: "Possible smoke", possible_fire: "Possible fire", manual: "Manual report", other: "Other" };
 
 export default function IncidentsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -26,16 +27,18 @@ export default function IncidentsPage() {
   const [saving, setSaving] = useState(false);
   const loadRequestRef = useRef(0);
   const deletingRef = useRef(false);
+  const statusFilter = filters.status || "";
+  const typeFilter = filters.type || "";
 
   const load = useCallback(async () => {
     const request = ++loadRequestRef.current;
     setLoading(true);
     try {
-      const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
+      const query = new URLSearchParams(Object.entries({ status: statusFilter, type: typeFilter }).filter(([, value]) => value));
       const [incidentData, tenantData, roomData] = await Promise.all([apiList(`/incidents/?${query}`), apiList("/tenants/?active=true&page_size=200"), apiList("/rooms/?active=true&page_size=200")]);
       if (request === loadRequestRef.current) { setItems(rows(incidentData)); setTenants(rows(tenantData)); setRooms(rows(roomData)); }
     } catch (err) { if (request === loadRequestRef.current) setError(err.message); } finally { if (request === loadRequestRef.current) setLoading(false); }
-  }, [filters]);
+  }, [statusFilter, typeFilter]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
     const id = Number(linkedIncident);
@@ -122,12 +125,20 @@ export default function IncidentsPage() {
     }
   }
 
+  const visibleItems = items.filter((item) => matchesSearch(filters.search, item.reference, item.details, item.source_display, item.assigned_tenant_name, typeLabels[item.incident_type])
+    && matchesValue(filters.room, item.room ?? "none") && inDateRange(item.occurred_at, filters.date_from, filters.date_to));
+
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Review queue</p><h1>Incidents</h1></div><button className="button primary" onClick={() => setModal("manual")}><Plus size={17} />Manual incident</button></header>
-    <div className="toolbar filter-bar"><Search size={17} /><select aria-label="Incident status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}><option value="">All statuses</option><option value="new">New</option><option value="reviewed">Reviewed</option><option value="verified">Verified</option><option value="assigned">Assigned</option><option value="dismissed">Dismissed</option></select><select aria-label="Detection type" value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}><option value="">All detection types</option>{Object.entries(typeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><ResetButton filters onClick={() => { setFilters({ status: "", type: "" }); setError(""); setSuccess(""); }} /><span>{items.length} incidents</span></div>
+    <div className="page-actions"><button className="button primary" onClick={() => setModal("manual")}><Plus size={17} />Manual incident</button></div>
+    <FilterBar label="Incidents" value={filters} onChange={setFilters} onReset={() => { setFilters({}); setError(""); setSuccess(""); }} searchLabel="Search incidents" count={visibleItems.length} fields={[
+      { key: "status", label: "Incident status", all: "All statuses", options: incidentStatuses },
+      { key: "type", label: "Detection type", all: "All types", options: incidentTypeOptions },
+      { key: "room", label: "Incident room", all: "All rooms", options: [{ value: "none", label: "Common area" }, ...optionsFor([...rooms.map((room) => ({ room: room.id, room_number: room.number })), ...items], (item) => item.room, (item) => `Room ${item.room_number ?? item.room}`)] },
+      { key: "date_from", label: "Incident from date", type: "date" }, { key: "date_to", label: "Incident to date", type: "date" },
+    ]} />
     <ErrorMessage message={!modal ? error : ""} /><SuccessMessage message={success} />
-    {loading ? <Loading /> : items.length === 0 ? <Empty title="No incidents found" detail="The selected queue is clear." /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Incident</th><th>Source / room</th><th>Confidence</th><th>Occurred</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
-      {items.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{typeLabels[item.incident_type]}</strong><small className="cell-detail">{item.details}</small></td><td>{item.room_number ? `Room ${item.room_number}` : item.source_display}</td><td>{item.confidence == null ? "-" : `${Math.round(item.confidence * 100)}%`}</td><td>{formatDate(item.occurred_at)}</td><td><span className={`status ${item.status}`}>{item.status}</span></td><td><div className="row-actions"><button className="icon-button" title="Review incident" onClick={() => inspect(item)}><Eye size={17} /></button><button className="icon-button" title="Delete incident" aria-label={`Delete ${item.reference}`} onClick={() => confirmDelete(item)}><Trash2 size={17} /></button></div></td></tr>)}
+    {loading ? <Loading /> : visibleItems.length === 0 ? <Empty title="No incidents found" detail="The selected queue is clear." /> : <section className="panel table-panel"><div className="table-scroll"><table><thead><tr><th>Reference</th><th>Incident</th><th>Source / room</th><th>Confidence</th><th>Occurred</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>
+      {visibleItems.map((item) => <tr key={item.id}><td className="mono">{item.reference}</td><td><strong>{typeLabels[item.incident_type]}</strong><small className="cell-detail">{item.details}</small></td><td>{item.room_number ? `Room ${item.room_number}` : item.source_display}</td><td>{item.confidence == null ? "-" : `${Math.round(item.confidence * 100)}%`}</td><td>{formatDate(item.occurred_at)}</td><td><span className={`status ${item.status}`}>{item.status}</span></td><td><div className="row-actions"><button className="icon-button" title="Review incident" onClick={() => inspect(item)}><Eye size={17} /></button><button className="icon-button" title="Delete incident" aria-label={`Delete ${item.reference}`} onClick={() => confirmDelete(item)}><Trash2 size={17} /></button></div></td></tr>)}
     </tbody></table></div></section>}
 
     {modal === "manual" && <Modal title="Record manual incident" onClose={() => setModal(null)}><form className="form-grid" onSubmit={createManual}>
@@ -140,7 +151,7 @@ export default function IncidentsPage() {
     {modal === "detail" && selected && <Modal title={`Review ${selected.reference}`} onClose={closeDetail} wide>
       <div className="incident-detail">
         <div className="evidence-frame">{selected.snapshot ? <img src={assetUrl(selected.snapshot)} alt={`Evidence for ${selected.reference}`} /> : <div className="empty-image"><Eye size={24} /><span>No snapshot attached</span></div>}</div>
-        <div className="detail-list"><div><span>Detection</span><strong>{typeLabels[selected.incident_type]}</strong></div><div><span>Status</span><strong><span className={`status ${selected.status}`}>{selected.status}</span></strong></div><div><span>Source</span><strong>{selected.source_display}</strong></div><div><span>Room</span><strong>{selected.room_number || "Not specified"}</strong></div><div><span>Occurred</span><strong>{formatDate(selected.occurred_at)}</strong></div><div><span>Assigned tenant</span><strong>{selected.assigned_tenant_name || "Not assigned"}</strong></div></div>
+        <div className="detail-list"><div><span>Detection</span><strong>{typeLabels[selected.incident_type]}</strong></div><div><span>Status</span><strong><span className={`status ${selected.status}`}>{selected.status}</span></strong></div><div><span>Source</span><strong>{selected.source_display}</strong></div><div><span>Room</span><strong>{selected.room_number || "Not specified"}</strong></div><div><span>Occurred</span><strong>{formatDate(selected.occurred_at)}</strong></div><div><span>Assigned occupant</span><strong>{selected.assigned_tenant_name || "Not assigned"}</strong></div></div>
       </div>
       <div className="detail-notes"><strong>Incident details</strong><p>{selected.details || "No additional details."}</p>{selected.review_notes && <><strong>Review notes</strong><p>{selected.review_notes}</p></>}</div>
       <ErrorMessage message={error} />
@@ -149,7 +160,7 @@ export default function IncidentsPage() {
         {selected.status === "new" && <button className="button subtle" onClick={() => action(selected, "review", { notes: "Reviewed in incident queue." })}><Eye size={17} />Mark reviewed</button>}
         {["new", "reviewed"].includes(selected.status) && <button className="button success-button" onClick={() => action(selected, "verify", { notes: "Manager verified evidence." })}><Check size={17} />Verify incident</button>}
         {["new", "reviewed", "verified"].includes(selected.status) && <button className="button danger-button" onClick={() => action(selected, "dismiss", { notes: "Dismissed by manager." })}><X size={17} />Dismiss</button>}
-        {selected.status === "verified" && <button className="button primary" onClick={() => setModal("assign")}><Link2 size={17} />Assign tenant</button>}
+        {selected.status === "verified" && <button className="button primary" onClick={() => setModal("assign")}><Link2 size={17} />Assign occupant</button>}
       </div>
     </Modal>}
 
@@ -160,6 +171,6 @@ export default function IncidentsPage() {
       <div className="form-actions"><button type="button" className="button subtle" onClick={cancelDelete} disabled={saving}>Cancel</button><button type="button" className="button danger-button" onClick={deleteIncident} disabled={saving}><Trash2 size={17} />{saving ? "Deleting..." : "Delete incident"}</button></div>
     </Modal>}
 
-    {modal === "assign" && selected && <Modal title={`Assign ${selected.reference}`} onClose={() => setModal("detail")}><form className="form-stack" onSubmit={assignTenant}><label>Tenant<select value={assign.tenant} onChange={(e) => setAssign({ ...assign, tenant: e.target.value })} required><option value="">Select tenant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.reference} · {tenant.full_name} · Room {tenant.room_number}</option>)}</select></label><label>Assignment notes<textarea rows="3" value={assign.notes} onChange={(e) => setAssign({ ...assign, notes: e.target.value })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal("detail")}>Back</button><ResetButton disabled={saving} onClick={() => { setAssign({ tenant: "", notes: "" }); setError(""); setSuccess(""); }} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Assign incident"}</button></div></form></Modal>}
+    {modal === "assign" && selected && <Modal title={`Assign ${selected.reference}`} onClose={() => setModal("detail")}><form className="form-stack" onSubmit={assignTenant}><label>Occupant<select value={assign.tenant} onChange={(e) => setAssign({ ...assign, tenant: e.target.value })} required><option value="">Select occupant</option>{tenants.map((tenant) => <option key={tenant.id} value={tenant.id}>{tenant.reference} · {tenant.full_name} · Room {tenant.room_number}</option>)}</select></label><label>Assignment notes<textarea rows="3" value={assign.notes} onChange={(e) => setAssign({ ...assign, notes: e.target.value })} /></label><ErrorMessage message={error} /><div className="form-actions"><button type="button" className="button subtle" onClick={() => setModal("detail")}>Back</button><ResetButton disabled={saving} onClick={() => { setAssign({ tenant: "", notes: "" }); setError(""); setSuccess(""); }} /><button className="button primary" disabled={saving}>{saving ? "Saving..." : "Assign incident"}</button></div></form></Modal>}
   </div>;
 }

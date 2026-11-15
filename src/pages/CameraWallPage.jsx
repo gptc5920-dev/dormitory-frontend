@@ -3,6 +3,8 @@ import { Camera, CircleStop, MonitorPlay, Play, RefreshCw, Settings2, Video, Wif
 import { Link } from "react-router-dom";
 import { api, apiList, rows } from "../api";
 import { Empty, ErrorMessage, Loading } from "../components/Feedback";
+import FilterBar from "../components/FilterBar";
+import { cameraFields, cameraMatches } from "../filters";
 
 const CAMERA_BINDINGS_KEY = "dormitory_camera_device_bindings";
 
@@ -24,7 +26,7 @@ function sourceStatus(source, deviceId, streaming) {
   return "Recorded source";
 }
 
-function CameraWallTile({ source, deviceId, registerController }) {
+function CameraWallTile({ source, deviceId, registerController, hidden }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const timerRef = useRef(null);
@@ -122,7 +124,7 @@ function CameraWallTile({ source, deviceId, registerController }) {
   const status = sourceStatus(source, deviceId, streaming);
   const statusClass = streaming || canStream ? "verified" : "reviewed";
 
-  return <article className="camera-wall-tile">
+  return <article className={`camera-wall-tile${hidden ? " hidden" : ""}`}>
     <header className="camera-wall-tile-heading">
       <div><h2>{source.name}</h2><span>{source.location}{source.room_number ? ` - Room ${source.room_number}` : ""}</span></div>
       <span className={`status ${statusClass}`}>{status}</span>
@@ -147,6 +149,7 @@ function CameraWallTile({ source, deviceId, registerController }) {
 }
 
 export default function CameraWallPage() {
+  const [filters, setFilters] = useState({});
   const controllersRef = useRef(new Map());
   const [sources, setSources] = useState([]);
   const [bindings, setBindings] = useState(readCameraBindings);
@@ -184,8 +187,9 @@ export default function CameraWallPage() {
     else controllersRef.current.delete(sourceId);
   }, []);
 
-  const readySources = sources.filter((source) => source.is_enabled && (source.source_type === "webcam" ? bindings[source.id] : source.source_type === "ip_camera" && source.has_stream_url));
-  const enabledSourceCount = sources.filter((source) => source.is_enabled).length;
+  const visibleSources = sources.filter((source) => cameraMatches(source, filters, bindings));
+  const readySources = visibleSources.filter((source) => source.is_enabled && (source.source_type === "webcam" ? bindings[source.id] : source.source_type === "ip_camera" && source.has_stream_url));
+  const enabledSourceCount = visibleSources.filter((source) => source.is_enabled).length;
 
   async function startAllStreams() {
     if (!readySources.length) {
@@ -201,14 +205,16 @@ export default function CameraWallPage() {
   }
 
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Live security overview</p><h1>Camera Wall</h1></div><Link className="button subtle" to="/monitoring"><Settings2 size={17} />Manage cameras</Link></header>
+    <div className="page-actions"><Link className="button subtle" to="/monitoring"><Settings2 size={17} />Manage cameras</Link></div>
     <ErrorMessage message={error} />
     {loading ? <Loading label="Loading camera sources" /> : <>
+      <FilterBar label="Camera Wall" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search cameras" count={visibleSources.length} fields={cameraFields(sources, true)} />
+      {visibleSources.length < sources.length && <p className="camera-filter-note">Hidden streams keep running. Stop all stops every stream.</p>}
       <section className="camera-wall-toolbar panel">
-        <div><p className="eyebrow">All camera sources</p><h2>{enabledSourceCount} enabled source{enabledSourceCount === 1 ? "" : "s"}</h2><span>Watch browser and IP camera feeds together. Each stream runs independently.</span></div>
+        <h2>{enabledSourceCount} enabled source{enabledSourceCount === 1 ? "" : "s"}</h2>
         <div className="camera-wall-actions"><button className="button primary" type="button" onClick={startAllStreams}><MonitorPlay size={17} />Start all</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button><button className="icon-button" type="button" title="Refresh sources" onClick={() => loadSources(true)} disabled={refreshing}><RefreshCw className={refreshing ? "spin" : ""} size={18} /></button></div>
       </section>
-      {sources.length ? <section className="camera-wall-grid">{sources.map((source) => <CameraWallTile key={source.id} source={source} deviceId={bindings[source.id] || ""} registerController={registerController} />)}</section> : <Empty title="No camera sources" detail="Add a browser camera or IP camera source from Monitoring to build the wall." />}
+      {sources.length ? <section className="camera-wall-grid">{sources.map((source) => <CameraWallTile key={source.id} source={source} hidden={!cameraMatches(source, filters, bindings)} deviceId={bindings[source.id] || ""} registerController={registerController} />)}{visibleSources.length === 0 && <Empty title="No matching cameras" />}</section> : <Empty title="No camera sources" detail="Add a browser camera or IP camera source from Monitoring to build the wall." />}
       <section className="camera-wall-note"><Video size={18} /><span>Configure cameras and run detection in Monitoring. IP previews refresh every three seconds.</span></section>
     </>}
   </div>;

@@ -65,7 +65,7 @@ for (const kind of ["webcam", "ip_camera"]) {
   });
 }
 
-test("registration camera waits for one face, captures automatically, and requires Save face", async ({ page }) => {
+test("registration camera captures the first photo and lets staff capture more angles before saving", async ({ page }) => {
   await prepareCamera(page);
   let checks = 0;
   let saves = 0;
@@ -85,19 +85,27 @@ test("registration camera waits for one face, captures automatically, and requir
     }
     return route.fulfill({ json: [] });
   });
-  await page.goto("/face-registration");
-  await page.getByRole("button", { name: "Register face for Alex Rivera" }).click();
+  await page.goto("/tenants");
+  await page.getByRole("button", { name: "Enroll face for Alex Rivera" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Use camera" }).click();
   await expect(dialog.getByText(/Looking for one clear face/)).toBeVisible();
   await expect(dialog.getByText("One face detected. Ready to enroll.")).toBeVisible();
-  await expect(dialog.getByAltText("Tenant enrollment face")).toBeVisible();
+  await expect(dialog.getByAltText("Occupant enrollment face")).toBeVisible();
   expect(checks).toBe(3);
   expect(saves).toBe(0);
-  expect(await page.evaluate(() => window.cameraTracks.every((track) => track.readyState === "ended"))).toBe(true);
+  expect(await page.evaluate(() => window.cameraTracks.every((track) => track.readyState === "live"))).toBe(true);
+  await expect(dialog.getByText(/Turn slightly left or right/)).toBeVisible();
+  await dialog.getByRole("button", { name: "Capture photo", exact: true }).click();
+  await expect(dialog.getByAltText("Occupant enrollment face 2", { exact: true })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Save face" })).toBeEnabled();
+  await page.waitForTimeout(1700);
+  expect(checks).toBe(4);
+  expect(saves).toBe(0);
   await dialog.getByRole("button", { name: "Save face" }).click();
   await expect(page.getByRole("button", { name: "Update face for Alex Rivera" })).toBeVisible();
   expect(saves).toBe(1);
+  expect(await page.evaluate(() => window.cameraTracks.every((track) => track.readyState === "ended"))).toBe(true);
 });
 
 test("stopping a registration camera discards a pending face check", async ({ page }) => {
@@ -115,8 +123,8 @@ test("stopping a registration camera discards a pending face check", async ({ pa
     }
     return route.fulfill({ json: [] });
   });
-  await page.goto("/face-registration");
-  await page.getByRole("button", { name: "Register face for Alex Rivera" }).click();
+  await page.goto("/tenants");
+  await page.getByRole("button", { name: "Enroll face for Alex Rivera" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Use camera" }).click();
   await expect.poll(() => checks).toBe(1);
@@ -124,7 +132,7 @@ test("stopping a registration camera discards a pending face check", async ({ pa
   release();
   await page.waitForTimeout(1800);
   expect(checks).toBe(1);
-  await expect(dialog.getByAltText("Tenant enrollment face")).toHaveCount(0);
+  await expect(dialog.getByAltText("Occupant enrollment face")).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Save face" })).toBeDisabled();
 });
 
@@ -140,8 +148,8 @@ test("registration stops checking and explains when face models are unavailable"
     }
     return route.fulfill({ json: [] });
   });
-  await page.goto("/face-registration");
-  await page.getByRole("button", { name: "Register face for Alex Rivera" }).click();
+  await page.goto("/tenants");
+  await page.getByRole("button", { name: "Enroll face for Alex Rivera" }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Use camera" }).click();
   await expect(dialog.getByRole("alert")).toContainText("Face recognition models are unavailable");

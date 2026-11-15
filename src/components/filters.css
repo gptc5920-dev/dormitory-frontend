@@ -1,0 +1,10 @@
+.module-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding: 14px; margin-bottom: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+.module-filters > label { flex: 1 1 140px; min-width: 0; max-width: 210px; }
+.module-filters > .module-filter-search { flex: 2 1 220px; max-width: none; }
+.module-filter-search > div { position: relative; }
+.module-filter-search svg { position: absolute; top: 50%; left: 10px; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.module-filter-search input { padding-left: 34px; }
+.module-filter-count { align-self: center; margin-left: auto; color: var(--muted); font-size: .75rem; white-space: nowrap; }
+.panel > .module-filters { margin: 14px; }
+.camera-filter-note { margin: 0 0 14px; font-size: .75rem; color: var(--muted); }
+@media (max-width: 600px) { .module-filters > label { flex-basis: calc(50% - 6px); max-width: none; } .module-filters > .module-filter-search { flex-basis: 100%; } .module-filters > .button { flex-shrink: 0; } }

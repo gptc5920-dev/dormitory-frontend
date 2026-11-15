@@ -9,6 +9,8 @@ import ResetButton from "../components/ResetButton";
 import { createUnknownFaceTracker, resetUnknownFaceTracker, trackUnknownFaces } from "../unknownFaceAlerts";
 import { useCameraAlerts } from "../context/CameraAlertsContext";
 import { useAuth } from "../context/AuthContext";
+import FilterBar from "../components/FilterBar";
+import { cameraFields, cameraMatches } from "../filters";
 
 const CAMERA_BINDINGS_KEY = "dormitory_camera_device_bindings";
 const blankUpload = { file: null, room: "", source_name: "Uploaded corridor video" };
@@ -35,7 +37,7 @@ function emptyCameraForm(source, deviceId = "") {
   };
 }
 
-function CameraStream({ source, deviceId, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus }) {
+function CameraStream({ source, deviceId, onConfigure, registerController, onUnknownFace, onActivity, onModelStatus, hidden }) {
   const stageRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -236,7 +238,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
   const sourceWidth = result?.frame?.width || videoRef.current?.videoWidth || 1;
   const sourceHeight = result?.frame?.height || videoRef.current?.videoHeight || 1;
 
-  return <article className="camera-stream-card">
+  return <article className={`camera-stream-card${hidden ? " hidden" : ""}`}>
     <header className="camera-stream-heading">
       <div><h2>{source.name}</h2><span>{source.location}{source.room_number ? ` · Room ${source.room_number}` : ""}</span></div>
       <div className="camera-card-actions">
@@ -284,6 +286,7 @@ function CameraStream({ source, deviceId, onConfigure, registerController, onUnk
 }
 
 export default function MonitoringPage() {
+  const [filters, setFilters] = useState({});
   const { user } = useAuth();
   const desktopAlerts = user?.desktop_alerts !== false;
   const controllersRef = useRef(new Map());
@@ -312,7 +315,7 @@ export default function MonitoringPage() {
     pushCameraAlert({
       kind: "unauthorized",
       title: "Possible unauthorized person",
-      detail: `${count} face${count === 1 ? "" : "s"} at ${source.name}${source.location ? ` (${source.location})` : ""} could not be matched to a registered active tenant. Check the camera and confirm whether the person has permission to be here.`,
+      detail: `${count} face${count === 1 ? "" : "s"} at ${source.name}${source.location ? ` (${source.location})` : ""} could not be matched to a registered active occupant. Check the camera and confirm whether the person has permission to be here.`,
       tag: `unknown-face-${source.id}`,
     });
   }, [pushCameraAlert]);
@@ -487,7 +490,7 @@ export default function MonitoringPage() {
   }
 
   async function startAllStreams() {
-    const configuredSources = browserSources.filter((source) => source.source_type === "ip_camera" ? source.has_stream_url : bindings[source.id]);
+    const configuredSources = visibleSources.filter((source) => source.source_type === "ip_camera" ? source.has_stream_url : bindings[source.id]);
     if (!configuredSources.length) {
       setError("Configure at least one camera before starting streams.");
       return;
@@ -519,29 +522,33 @@ export default function MonitoringPage() {
   }
 
   const browserSources = sources.filter((source) => ["webcam", "ip_camera"].includes(source.source_type) && source.is_enabled);
-  const configuredCount = browserSources.filter((source) => source.source_type === "ip_camera" ? source.has_stream_url : bindings[source.id]).length;
+  const visibleSources = browserSources.filter((source) => cameraMatches(source, filters, bindings));
+  const configuredCount = visibleSources.filter((source) => source.source_type === "ip_camera" ? source.has_stream_url : bindings[source.id]).length;
   const assignableDevices = devices.filter((device) => !Object.entries(bindings).some(([sourceId, boundDevice]) => Number(sourceId) !== cameraForm.id && boundDevice === device.deviceId));
 
   return <div className="page">
-    <header className="page-header"><div><p className="eyebrow">Camera operations</p><h1>Monitoring</h1></div><div className="camera-toolbar-actions"><span className={`status ${status?.capabilities?.bottle?.ready ? "verified" : "reviewed"}`}>{status?.capabilities?.bottle?.ready ? "Bottle detection ready" : status ? "Check detection setup" : "Checking detection"}</span><button type="button" className="button subtle small" disabled={!status} onClick={() => setDetectorInfoOpen(true)}><ScanLine size={16} />Detection details</button></div></header>
+    <div className="page-actions"><div className="camera-toolbar-actions"><span className={`status ${status?.capabilities?.bottle?.ready ? "verified" : "reviewed"}`}>{status?.capabilities?.bottle?.ready ? "Bottle detection ready" : status ? "Check detection setup" : "Checking detection"}</span><button type="button" className="button subtle small" disabled={!status} onClick={() => setDetectorInfoOpen(true)}><ScanLine size={16} />Detection details</button></div></div>
     <ErrorMessage message={setupOpen ? "" : error} />
     <SuccessMessage message={success} />
     {!status ? <Loading label="Checking detector" /> : <>
       {detectorInfoOpen && <Modal title="Detection details" onClose={() => setDetectorInfoOpen(false)}>
         <section className="model-banner"><ScanLine size={21} /><div><strong>{status.mode}</strong><span>{status.notice}</span></div></section>
         {status.capabilities && <div className="detector-capabilities">{[["bottle", "Bottle detection"], ["smoke", "Smoke detection"], ["possible_drinking", "Possible drinking gesture"]].map(([key, label]) => <section key={key} aria-label={label}><div><strong>{label}</strong><span className={`status ${status.capabilities[key]?.ready ? "verified" : "reviewed"}`}>{status.capabilities[key]?.ready ? "Ready" : "Unavailable"}</span></div><p>{status.capabilities[key]?.detail}</p></section>)}</div>}
-        <p className="muted">Face matching compares camera faces with registered active tenants. An unmatched face raises a possible unauthorized person warning for staff review.</p>
+        <p className="muted">Face matching compares camera faces with registered active occupants. An unmatched face raises a possible unauthorized person warning for staff review.</p>
       </Modal>}
+      <FilterBar label="Monitoring" value={filters} onChange={setFilters} onReset={() => setFilters({})} searchLabel="Search cameras" count={visibleSources.length} fields={cameraFields(browserSources)} />
+      {visibleSources.length < browserSources.length && <p className="camera-filter-note">Hidden streams keep running. Stop all stops every stream.</p>}
       <section className="camera-toolbar panel">
-        <div><p className="eyebrow">Live cameras</p><h2>{configuredCount} of {browserSources.length} source{browserSources.length === 1 ? "" : "s"} configured</h2><span>Detection starts automatically with each stream. Use Stop detection to pause scanning.</span></div>
+        <div><h2>{configuredCount} of {visibleSources.length} source{visibleSources.length === 1 ? "" : "s"} configured</h2><span>Detection starts with each stream.</span></div>
         <div className="camera-toolbar-actions"><button className="button primary" type="button" onClick={() => configureCamera()}><Plus size={17} />Set up camera</button><button className="button subtle" type="button" disabled={!configuredCount} onClick={startAllStreams}><MonitorPlay size={17} />Start all streams</button><button className="button subtle" type="button" onClick={stopAllStreams}><CircleStop size={17} />Stop all</button>{desktopAlerts && desktopPermission === "default" && <button className="button subtle" type="button" onClick={enableDesktopAlerts}><BellRing size={17} />Enable desktop alerts</button>}{desktopAlerts && desktopPermission === "granted" && <span className="status verified">Desktop alerts on</span>}{!desktopAlerts && <Link className="button subtle" to="/settings">Desktop alerts off</Link>}</div>
       </section>
       <section className="camera-stream-grid">
-        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} /> : <CameraStream key={source.id} source={source} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} />)}
+        {browserSources.map((source) => source.source_type === "ip_camera" ? <NetworkCameraStream key={source.id} source={source} hidden={!cameraMatches(source, filters, bindings)} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} /> : <CameraStream key={source.id} source={source} hidden={!cameraMatches(source, filters, bindings)} deviceId={bindings[source.id] || ""} onConfigure={configureCamera} registerController={registerController} onUnknownFace={notifyUnknownFace} onActivity={notifyActivity} onModelStatus={setStatus} />)}
+        {browserSources.length > 0 && visibleSources.length === 0 && <div className="empty camera-empty"><strong>No matching cameras</strong></div>}
         {!browserSources.length && <div className="empty camera-empty"><Camera size={25} /><strong>No cameras are configured</strong><span>Choose Set up camera to add a camera source.</span></div>}
       </section>
       {setupOpen && <Modal title={cameraForm.id ? "Configure camera" : "Set up camera"} onClose={closeSetup} wide>
-        <p className="muted">For Wi-Fi CCTV, connect the camera to Wi-Fi using its manufacturer app, enable RTSP, and enter its stream URL. The server must be on the same network or have a route to the camera. For a webcam, click Discover cameras and allow access, then enter its name and location. After saving, use Start stream to view the camera.</p>
+        <p className="muted">{cameraForm.source_type === "ip_camera" ? "Enable RTSP on the camera and enter a stream URL reachable by the server." : "Select Discover cameras and allow browser access."}</p>
         {cameraForm.source_type === "webcam" && <button className="button subtle" type="button" disabled={discoveringDevices || savingCamera} onClick={() => loadAvailableDevices(true)}><Video size={17} />{discoveringDevices ? "Checking cameras..." : "Discover cameras"}</button>}
         <ErrorMessage message={error} />
         <form className="form-grid camera-setup-modal-form" onSubmit={saveCamera}>
@@ -554,7 +561,7 @@ export default function MonitoringPage() {
         </form>
       </Modal>}
       <section className="upload-band">
-        <div><p className="eyebrow">Recorded footage</p><h2>Analyze uploaded video</h2></div>
+        <h2>Analyze uploaded video</h2>
         <form className="upload-form" onSubmit={processUpload}>
           <label>Video file<input ref={uploadRef} type="file" accept="video/mp4,video/quicktime,video/x-msvideo,video/*" onChange={(event) => setUpload({ ...upload, file: event.target.files[0] || null })} required /></label>
           <label>Source label<input value={upload.source_name} onChange={(event) => setUpload({ ...upload, source_name: event.target.value })} required /></label>

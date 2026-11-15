@@ -29,7 +29,7 @@ export default function App() {
     <Route element={<ProtectedLayout />}>
       <Route path="/" element={<DashboardPage />} />
       <Route path="/tenants" element={<TenantsPage />} />
-      <Route path="/face-registration" element={<TenantsPage key="face-registration" faceRegistry />} />
+      <Route path="/face-registration" element={<Navigate to="/tenants" replace />} />
       <Route path="/rooms" element={<RoomsPage />} />
       <Route path="/rules" element={<RulesPage />} />
       <Route path="/incidents" element={<IncidentsPage />} />

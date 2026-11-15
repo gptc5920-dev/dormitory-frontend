@@ -34,7 +34,6 @@ export default function CameraNotifications() {
       <BellRing size={20} />{unread > 0 && <span className="notification-badge" aria-hidden="true">{unread > 9 ? "9+" : unread}</span>}
     </button>
     {open && <Modal title="Camera notifications" onClose={() => setOpen(false)} wide>
-      <p className="muted">Recent camera warnings saved for your account in this browser. Unmatched faces require staff review.</p>
       {unread > 0 && <button type="button" className="button subtle small" onClick={markAllRead}>Mark all read</button>}
       {alerts.length ? <div className="notification-history">{alerts.map((alert) => <article key={alert.id} className={alert.read ? "" : "unread"}>
         <div className="notification-history-meta"><time dateTime={alert.createdAt}>{formatDate(alert.createdAt)}</time>{!alert.read && <span className="status reviewed">Unread</span>}</div>
